@@ -37,7 +37,10 @@ export class SimpleStats {
     const requestsPerMinute = Math.round((this.stats.totalRequests / (uptime / 1000)) * 60);
     
     return {
-      ...this.stats,
+      totalRequests: this.stats.totalRequests,
+      blockedRequests: this.stats.blockedRequests,
+      allowedRequests: this.stats.allowedRequests,
+      startTime: this.stats.startTime,
       uptime,
       requestsPerMinute,
       blockRate: this.stats.totalRequests > 0 
