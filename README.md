@@ -1,6 +1,6 @@
 # API Rate Limiter
 
-A standalone, Redis-backed rate limiting service that can protect any API with configurable rate limiting rules and multiple algorithms.
+A standalone, Redis-backed rate limiting service that can protect any API with configurable rate limiting rules and multiple algorithms..
 
 ## Features
 
