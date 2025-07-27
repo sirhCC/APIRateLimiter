@@ -20,6 +20,43 @@ import { ApiRateLimiterConfig, RateLimitRule } from './types';
 // Load environment variables
 config();
 
+// Environment validation and setup
+function validateEnvironment() {
+  const errors: string[] = [];
+  
+  // Validate JWT secret
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret || jwtSecret === 'your-super-secret-jwt-key-change-in-production' || jwtSecret.length < 32) {
+    errors.push('JWT_SECRET must be set to a secure random string (minimum 32 characters)');
+  }
+  
+  // Warn about production settings
+  if (process.env.NODE_ENV === 'production') {
+    if (process.env.DEMO_USERS_ENABLED === 'true') {
+      console.warn('⚠️  WARNING: Demo users are enabled in production mode');
+    }
+    
+    if (process.env.CORS_ORIGIN === '*') {
+      console.warn('⚠️  WARNING: CORS is set to allow all origins in production');
+    }
+    
+    if (process.env.REDIS_ENABLED !== 'true') {
+      console.warn('⚠️  WARNING: Redis is disabled - limited functionality in production');
+    }
+  }
+  
+  if (errors.length > 0) {
+    console.error('❌ Environment validation failed:');
+    errors.forEach(error => console.error(`   - ${error}`));
+    process.exit(1);
+  }
+  
+  console.log('✅ Environment validation passed');
+}
+
+// Validate environment before starting
+validateEnvironment();
+
 const app = express();
 
 // Middleware
@@ -37,6 +74,7 @@ const appConfig: ApiRateLimiterConfig = {
     port: parseInt(process.env.REDIS_PORT || '6379'),
     password: process.env.REDIS_PASSWORD,
     db: parseInt(process.env.REDIS_DB || '0'),
+    enabled: process.env.REDIS_ENABLED === 'true',
   },
   server: {
     port: parseInt(process.env.PORT || '3000'),
@@ -49,13 +87,30 @@ const appConfig: ApiRateLimiterConfig = {
   },
   rules: loadRulesFromConfig(),
   monitoring: {
-    enabled: process.env.MONITORING_ENABLED === 'true',
+    enabled: process.env.MONITORING_ENABLED !== 'false',
     statsRetentionMs: parseInt(process.env.STATS_RETENTION_MS || '3600000'), // 1 hour
+  },
+  security: {
+    jwtSecret: process.env.JWT_SECRET!,
+    jwtExpiresIn: process.env.JWT_EXPIRES_IN || '24h',
+    jwtAlgorithm: (process.env.JWT_ALGORITHM as any) || 'HS256',
+    demoUsersEnabled: process.env.DEMO_USERS_ENABLED !== 'false',
+    corsOrigin: process.env.CORS_ORIGIN || '*',
+    logAuthEvents: process.env.LOG_AUTH_EVENTS === 'true',
+    logRateLimitViolations: process.env.LOG_RATE_LIMIT_VIOLATIONS === 'true',
   },
 };
 
-// Initialize Redis client and stats
+// Initialize Redis client with conditional connection
 const redis = new RedisClient(appConfig.redis);
+
+// Log Redis status
+if (appConfig.redis.enabled) {
+  console.log(`📡 Redis connection enabled: ${appConfig.redis.host}:${appConfig.redis.port}`);
+} else {
+  console.log('⚠️  Redis connection disabled - using in-memory fallback');
+}
+
 const stats = new SimpleStats();
 
 // Initialize API key manager
@@ -79,13 +134,15 @@ const apiKeyAuth = createApiKeyMiddleware({
   required: false, // Allow unauthenticated requests to fall back to IP-based limiting
   checkQuota: true,
   onKeyValidated: (req, keyMetadata) => {
-    console.log(`✅ API key validated: ${keyMetadata.name} (${keyMetadata.tier})`);
+    if (appConfig.security.logAuthEvents) {
+      console.log(`✅ API key validated: ${keyMetadata.name} (${keyMetadata.tier})`);
+    }
   },
 });
 
 // JWT authentication middleware (optional for public endpoints)
 const jwtAuth = createJWTAuthMiddleware({
-  secret: process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production',
+  secret: appConfig.security.jwtSecret,
   required: false, // Allow unauthenticated requests
   algorithms: ['HS256'],
   roleBasedRateLimit: {
@@ -300,6 +357,15 @@ app.post('/auth/login', async (req, res): Promise<void> => {
       return;
     }
 
+    // Check if demo users are enabled
+    if (!appConfig.security.demoUsersEnabled) {
+      res.status(503).json({
+        error: 'Demo authentication disabled',
+        message: 'Demo users are disabled. Please configure your own authentication system.'
+      });
+      return;
+    }
+
     // Demo users for testing
     const demoUsers = {
       'admin@example.com': { id: 'admin-1', role: 'admin', tier: 'enterprise' },
@@ -312,14 +378,16 @@ app.post('/auth/login', async (req, res): Promise<void> => {
     if (!user || password !== 'demo123') {
       res.status(401).json({ 
         error: 'Invalid credentials',
-        message: 'Use one of the demo accounts: admin@example.com, premium@example.com, user@example.com, guest@example.com with password: demo123'
+        message: appConfig.security.demoUsersEnabled 
+          ? 'Use one of the demo accounts: admin@example.com, premium@example.com, user@example.com, guest@example.com with password: demo123'
+          : 'Please provide valid credentials'
       });
       return;
     }
 
     // Generate JWT token
     const jwt = require('jsonwebtoken');
-    const secret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production';
+    const secret = appConfig.security.jwtSecret;
     
     const token = jwt.sign(
       {
@@ -357,7 +425,7 @@ app.post('/auth/login', async (req, res): Promise<void> => {
 });
 
 // Verify JWT token
-app.get('/auth/verify', requireJWT(process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production'), (req, res) => {
+app.get('/auth/verify', requireJWT(appConfig.security.jwtSecret), (req, res) => {
   res.json({
     message: 'Token is valid',
     user: req.user,
@@ -367,7 +435,7 @@ app.get('/auth/verify', requireJWT(process.env.JWT_SECRET || 'your-super-secret-
 
 // Admin-only endpoint
 app.get('/admin/users', 
-  requireJWT(process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production'), 
+  requireJWT(appConfig.security.jwtSecret), 
   requireRole(['admin']), 
   (req, res) => {
   res.json({
@@ -383,7 +451,7 @@ app.get('/admin/users',
 
 // Premium role endpoint
 app.get('/premium/features', 
-  requireJWT(process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production'), 
+  requireJWT(appConfig.security.jwtSecret), 
   requireRole(['admin', 'premium']), 
   (req, res) => {
   res.json({
@@ -400,7 +468,7 @@ app.get('/premium/features',
 
 // Permission-based endpoint
 app.get('/secure/data', 
-  requireJWT(process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production'), 
+  requireJWT(appConfig.security.jwtSecret), 
   requirePermission(['read', 'write']), 
   (req, res) => {
   res.json({
