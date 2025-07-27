@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
@@ -7,6 +7,8 @@ import { config } from 'dotenv';
 import { RedisClient } from './utils/redis';
 import { SimpleStats } from './utils/stats';
 import { performanceMonitor, startPerformanceCleanup } from './utils/performance';
+import { initializeApiKeyManager, ApiKeyManager } from './utils/apiKeys';
+import { createApiKeyMiddleware, requireApiKey } from './middleware/apiKeyAuth';
 import { createRateLimitMiddleware, createResetEndpoint } from './middleware';
 import { createIPFilterMiddleware } from './middleware/ipFilter';
 import { createRateLimitLogger } from './middleware/logger';
@@ -53,6 +55,9 @@ const appConfig: ApiRateLimiterConfig = {
 const redis = new RedisClient(appConfig.redis);
 const stats = new SimpleStats();
 
+// Initialize API key manager
+const apiKeyManager = initializeApiKeyManager(redis);
+
 // Trust proxy (for accurate IP addresses)
 app.set('trust proxy', process.env.ENABLE_TRUST_PROXY === 'true');
 
@@ -64,6 +69,16 @@ const ipFilter = createIPFilterMiddleware({
 
 // Request logger with stats integration
 const rateLimitLogger = createRateLimitLogger(stats);
+
+// API key authentication middleware (optional for public endpoints)
+const apiKeyAuth = createApiKeyMiddleware({
+  apiKeyManager,
+  required: false, // Allow unauthenticated requests to fall back to IP-based limiting
+  checkQuota: true,
+  onKeyValidated: (req, keyMetadata) => {
+    console.log(`✅ API key validated: ${keyMetadata.name} (${keyMetadata.tier})`);
+  },
+});
 
 // Create rate limiting middleware
 const rateLimitMiddleware = createRateLimitMiddleware({
@@ -77,15 +92,60 @@ const rateLimitMiddleware = createRateLimitMiddleware({
     }
     
     // Use API key if present, otherwise fall back to IP
-    const apiKey = req.headers[process.env.API_KEY_HEADER || 'x-api-key'] as string;
+    if (req.apiKey) {
+      return `api:${req.apiKey.id}:${req.path}`;
+    }
+    
     const ip = req.ip || req.connection.remoteAddress || 'unknown';
-    return apiKey ? `api:${apiKey}:${req.path}` : `ip:${ip}:${req.path}`;
+    return `ip:${ip}:${req.path}`;
   },
   onLimitReached: (req, res, rule) => {
     stats.recordRequest(req, true);
-    console.log(`🚫 Rate limit exceeded for rule "${rule.name}" - ${req.method} ${req.path}`);
+    const identifier = req.apiKey ? `API key ${req.apiKey.name}` : `IP ${req.ip}`;
+    console.log(`🚫 Rate limit exceeded for ${identifier} - ${req.method} ${req.path} (rule: "${rule.name}")`);
   },
 });
+
+// Create API key-aware rate limiting middleware
+const createApiKeyAwareRateLimiter = () => {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    // Skip rate limiting for whitelisted IPs
+    if (req.isWhitelisted) {
+      stats.recordRequest(req, false);
+      return next();
+    }
+
+    // If API key is present, use tier-specific rate limiting
+    if (req.apiKey && req.apiKey.rateLimit) {
+      const key = `api:${req.apiKey.id}:${req.originalUrl}`;
+      const config = req.apiKey.rateLimit;
+      
+      try {
+        const rateLimiter = createOptimizedRateLimiter(redis, {
+          windowMs: config.windowMs,
+          maxRequests: config.maxRequests,
+          algorithm: config.algorithm,
+          burstCapacity: config.burstCapacity,
+          keyGenerator: () => key,
+        });
+
+        await rateLimiter.middleware()(req, res, (err?: any) => {
+          if (!err && res.statusCode !== 429) {
+            stats.recordRequest(req, false);
+          }
+          next(err);
+        });
+      } catch (error) {
+        console.error('API key rate limiting error:', error);
+        // Fall back to default rate limiting
+        rateLimitMiddleware(req, res, next);
+      }
+    } else {
+      // Use default IP-based rate limiting
+      rateLimitMiddleware(req, res, next);
+    }
+  };
+};
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -163,6 +223,151 @@ app.delete('/rules/:id', (req, res) => {
 
 // Reset rate limits
 app.post('/reset/:key', createResetEndpoint(redis));
+
+// API Key Management Endpoints
+
+// Generate new API key
+app.post('/api-keys', async (req, res) => {
+  try {
+    const { name, tier = 'free', userId, organizationId, metadata } = req.body;
+    
+    if (!name) {
+      return res.status(400).json({ error: 'API key name is required' });
+    }
+
+    const result = await apiKeyManager.generateApiKey({
+      name,
+      tier,
+      userId,
+      organizationId,
+      metadata,
+    });
+
+    res.status(201).json({
+      message: 'API key created successfully',
+      apiKey: result.apiKey,
+      metadata: {
+        ...result.metadata,
+        key: undefined, // Don't expose the hashed key
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ 
+      error: 'Failed to create API key',
+      message: error.message,
+    });
+  }
+});
+
+// List API keys for a user
+app.get('/api-keys', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'userId query parameter is required' });
+    }
+
+    const keys = await apiKeyManager.getUserKeys(userId as string);
+    
+    // Remove sensitive data
+    const sanitizedKeys = keys.map(key => ({
+      ...key,
+      key: undefined,
+    }));
+
+    res.json({
+      message: 'API keys retrieved successfully',
+      keys: sanitizedKeys,
+    });
+  } catch (error: any) {
+    res.status(500).json({ 
+      error: 'Failed to retrieve API keys',
+      message: error.message,
+    });
+  }
+});
+
+// Get API key details (for authenticated requests)
+app.get('/api-keys/:keyId', async (req, res) => {
+  try {
+    const { keyId } = req.params;
+    const metadata = await apiKeyManager['getKeyMetadata'](keyId);
+    
+    if (!metadata) {
+      return res.status(404).json({ error: 'API key not found' });
+    }
+
+    // Remove sensitive data
+    const sanitizedMetadata = {
+      ...metadata,
+      key: undefined,
+    };
+
+    res.json({
+      message: 'API key details retrieved successfully',
+      metadata: sanitizedMetadata,
+    });
+  } catch (error: any) {
+    res.status(500).json({ 
+      error: 'Failed to retrieve API key details',
+      message: error.message,
+    });
+  }
+});
+
+// Revoke API key
+app.delete('/api-keys/:keyId', async (req, res) => {
+  try {
+    const { keyId } = req.params;
+    const success = await apiKeyManager.revokeApiKey(keyId);
+    
+    if (!success) {
+      return res.status(404).json({ error: 'API key not found or already revoked' });
+    }
+
+    res.json({ message: 'API key revoked successfully' });
+  } catch (error: any) {
+    res.status(500).json({ 
+      error: 'Failed to revoke API key',
+      message: error.message,
+    });
+  }
+});
+
+// Get available tiers
+app.get('/api-keys/tiers', (req, res) => {
+  try {
+    const tiers = apiKeyManager.getTiers();
+    res.json({
+      message: 'Available API key tiers',
+      tiers,
+    });
+  } catch (error: any) {
+    res.status(500).json({ 
+      error: 'Failed to retrieve tiers',
+      message: error.message,
+    });
+  }
+});
+
+// Check API key usage/quota
+app.get('/api-keys/:keyId/usage', async (req, res) => {
+  try {
+    const { keyId } = req.params;
+    const quotaCheck = await apiKeyManager.checkQuota(keyId);
+    
+    res.json({
+      message: 'API key usage information',
+      ...quotaCheck,
+    });
+  } catch (error: any) {
+    res.status(500).json({ 
+      error: 'Failed to retrieve usage information',
+      message: error.message,
+    });
+  }
+});
 
 // Stats endpoint
 app.get('/stats', async (req, res) => {
@@ -252,7 +457,11 @@ app.post('/stats/reset', (req, res) => {
 
 // Apply middleware in order
 app.use(ipFilter);
+app.use(apiKeyAuth); // Add API key authentication
 app.use(rateLimitLogger);
+
+// Create the final rate limiting middleware
+const finalRateLimitMiddleware = createApiKeyAwareRateLimiter();
 
 // Apply rate limiting to all other routes
 app.use((req, res, next) => {
@@ -262,10 +471,10 @@ app.use((req, res, next) => {
     return next();
   }
   
-  // Apply rate limiting
-  rateLimitMiddleware(req, res, (err) => {
-    if (!err && res.statusCode !== 429) {
-      stats.recordRequest(req, false);
+  // Apply API key-aware rate limiting
+  finalRateLimitMiddleware(req, res, (err) => {
+    if (err) {
+      console.error('Rate limiting error:', err);
     }
     next(err);
   });
