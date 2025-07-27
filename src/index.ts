@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import cookieParser from 'cookie-parser';
 import path from 'path';
 import { config } from 'dotenv';
 import { RedisClient } from './utils/redis';
@@ -9,6 +10,7 @@ import { SimpleStats } from './utils/stats';
 import { performanceMonitor, startPerformanceCleanup } from './utils/performance';
 import { initializeApiKeyManager, ApiKeyManager } from './utils/apiKeys';
 import { createApiKeyMiddleware, requireApiKey } from './middleware/apiKeyAuth';
+import { createJWTAuthMiddleware, requireRole, requirePermission, requireJWT } from './middleware/jwtAuth';
 import { createRateLimitMiddleware, createResetEndpoint } from './middleware';
 import { createIPFilterMiddleware } from './middleware/ipFilter';
 import { createRateLimitLogger } from './middleware/logger';
@@ -23,6 +25,7 @@ const app = express();
 // Middleware
 app.use(helmet());
 app.use(cors());
+app.use(cookieParser()); // Add cookie parser for JWT support
 app.use(performanceMonitor.middleware()); // Add performance monitoring
 app.use(morgan('combined'));
 app.use(express.json());
@@ -80,6 +83,40 @@ const apiKeyAuth = createApiKeyMiddleware({
   },
 });
 
+// JWT authentication middleware (optional for public endpoints)
+const jwtAuth = createJWTAuthMiddleware({
+  secret: process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production',
+  required: false, // Allow unauthenticated requests
+  algorithms: ['HS256'],
+  roleBasedRateLimit: {
+    admin: {
+      windowMs: 60000,
+      maxRequests: 10000, // Very high limit for admins
+      algorithm: 'token-bucket',
+      burstCapacity: 500,
+    },
+    premium: {
+      windowMs: 60000,
+      maxRequests: 1000,
+      algorithm: 'token-bucket',
+      burstCapacity: 100,
+    },
+    user: {
+      windowMs: 60000,
+      maxRequests: 500,
+      algorithm: 'sliding-window',
+    },
+    guest: {
+      windowMs: 60000,
+      maxRequests: 100,
+      algorithm: 'fixed-window',
+    },
+  },
+  onTokenValidated: (req, user) => {
+    console.log(`✅ JWT validated: ${user.email || user.id} (${user.role || 'no-role'})`);
+  },
+});
+
 // Create rate limiting middleware
 const rateLimitMiddleware = createRateLimitMiddleware({
   redis,
@@ -106,7 +143,7 @@ const rateLimitMiddleware = createRateLimitMiddleware({
   },
 });
 
-// Create API key-aware rate limiting middleware
+// Create API key and JWT aware rate limiting middleware
 const createApiKeyAwareRateLimiter = () => {
   return async (req: Request, res: Response, next: NextFunction) => {
     // Skip rate limiting for whitelisted IPs
@@ -115,7 +152,7 @@ const createApiKeyAwareRateLimiter = () => {
       return next();
     }
 
-    // If API key is present, use tier-specific rate limiting
+    // Priority 1: API key-specific rate limiting
     if (req.apiKey && req.apiKey.rateLimit) {
       const key = `api:${req.apiKey.id}:${req.originalUrl}`;
       const config = req.apiKey.rateLimit;
@@ -137,11 +174,35 @@ const createApiKeyAwareRateLimiter = () => {
         });
       } catch (error) {
         console.error('API key rate limiting error:', error);
-        // Fall back to default rate limiting
-        rateLimitMiddleware(req, res, next);
+        next();
+      }
+    }
+    // Priority 2: JWT role-based rate limiting
+    else if (req.isJWTAuthenticated && req.user && req.jwtRateLimit) {
+      const key = `jwt:${req.user.id}:${req.originalUrl}`;
+      const config = req.jwtRateLimit;
+      
+      try {
+        const rateLimiter = createOptimizedRateLimiter(redis, {
+          windowMs: config.windowMs,
+          maxRequests: config.maxRequests,
+          algorithm: config.algorithm,
+          burstCapacity: config.burstCapacity,
+          keyGenerator: () => key,
+        });
+
+        await rateLimiter.middleware()(req, res, (err?: any) => {
+          if (!err && res.statusCode !== 429) {
+            stats.recordRequest(req, false);
+          }
+          next(err);
+        });
+      } catch (error) {
+        console.error('JWT rate limiting error:', error);
+        next();
       }
     } else {
-      // Use default IP-based rate limiting
+      // Priority 3: Default IP-based rate limiting
       rateLimitMiddleware(req, res, next);
     }
   };
@@ -224,153 +285,132 @@ app.delete('/rules/:id', (req, res) => {
 // Reset rate limits
 app.post('/reset/:key', createResetEndpoint(redis));
 
-// API Key Management Endpoints
+// JWT Authentication Endpoints
 
-// Generate new API key
-app.post('/api-keys', async (req, res): Promise<void> => {
+// Generate JWT token (demo endpoint)
+app.post('/auth/login', async (req, res): Promise<void> => {
   try {
-    const { name, tier = 'free', userId, organizationId, metadata } = req.body;
+    const { email, password, role = 'user' } = req.body;
     
-    if (!name) {
-      res.status(400).json({ error: 'API key name is required' });
+    // Demo authentication - in production, validate against your user database
+    if (!email || !password) {
+      res.status(400).json({ 
+        error: 'Email and password are required',
+      });
       return;
     }
 
-    const result = await apiKeyManager.generateApiKey({
-      name,
-      tier,
-      userId,
-      organizationId,
-      metadata,
-    });
-
-    res.status(201).json({
-      message: 'API key created successfully',
-      apiKey: result.apiKey,
-      metadata: {
-        ...result.metadata,
-        key: undefined, // Don't expose the hashed key
-      },
-    });
-  } catch (error: any) {
-    res.status(500).json({ 
-      error: 'Failed to create API key',
-      message: error.message,
-    });
-  }
-});
-
-// List API keys for a user
-app.get('/api-keys', async (req, res): Promise<void> => {
-  try {
-    const { userId } = req.query;
-    
-    if (!userId) {
-      res.status(400).json({ error: 'userId query parameter is required' });
-      return;
-    }
-
-    const keys = await apiKeyManager.getUserKeys(userId as string);
-    
-    // Remove sensitive data
-    const sanitizedKeys = keys.map(key => ({
-      ...key,
-      key: undefined,
-    }));
-
-    res.json({
-      message: 'API keys retrieved successfully',
-      keys: sanitizedKeys,
-    });
-  } catch (error: any) {
-    res.status(500).json({ 
-      error: 'Failed to retrieve API keys',
-      message: error.message,
-    });
-  }
-});
-
-// Get available tiers (must be before /:keyId route)
-app.get('/api-keys/tiers', (req, res) => {
-  try {
-    const tiers = apiKeyManager.getTiers();
-    res.json({
-      message: 'Available API key tiers',
-      tiers,
-    });
-  } catch (error: any) {
-    res.status(500).json({ 
-      error: 'Failed to retrieve tiers',
-      message: error.message,
-    });
-  }
-});
-
-// Get API key details (for authenticated requests)
-app.get('/api-keys/:keyId', async (req, res): Promise<void> => {
-  try {
-    const { keyId } = req.params;
-    const metadata = await apiKeyManager.getKeyMetadata(keyId);
-    
-    if (!metadata) {
-      res.status(404).json({ error: 'API key not found' });
-      return;
-    }
-
-    // Remove sensitive data
-    const sanitizedMetadata = {
-      ...metadata,
-      key: undefined,
+    // Demo users for testing
+    const demoUsers = {
+      'admin@example.com': { id: 'admin-1', role: 'admin', tier: 'enterprise' },
+      'premium@example.com': { id: 'premium-1', role: 'premium', tier: 'premium' },
+      'user@example.com': { id: 'user-1', role: 'user', tier: 'free' },
+      'guest@example.com': { id: 'guest-1', role: 'guest', tier: 'free' },
     };
 
-    res.json({
-      message: 'API key details retrieved successfully',
-      metadata: sanitizedMetadata,
-    });
-  } catch (error: any) {
-    res.status(500).json({ 
-      error: 'Failed to retrieve API key details',
-      message: error.message,
-    });
-  }
-});
-
-// Revoke API key
-app.delete('/api-keys/:keyId', async (req, res): Promise<void> => {
-  try {
-    const { keyId } = req.params;
-    const success = await apiKeyManager.revokeApiKey(keyId);
-    
-    if (!success) {
-      res.status(404).json({ error: 'API key not found or already revoked' });
+    const user = demoUsers[email as keyof typeof demoUsers];
+    if (!user || password !== 'demo123') {
+      res.status(401).json({ 
+        error: 'Invalid credentials',
+        message: 'Use one of the demo accounts: admin@example.com, premium@example.com, user@example.com, guest@example.com with password: demo123'
+      });
       return;
     }
 
-    res.json({ message: 'API key revoked successfully' });
+    // Generate JWT token
+    const jwt = require('jsonwebtoken');
+    const secret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production';
+    
+    const token = jwt.sign(
+      {
+        id: user.id,
+        email: email,
+        role: user.role,
+        tier: user.tier,
+        permissions: user.role === 'admin' ? ['read', 'write', 'admin'] : ['read'],
+      },
+      secret,
+      { 
+        expiresIn: '24h',
+        algorithm: 'HS256'
+      }
+    );
+
+    res.json({
+      message: 'Login successful',
+      token,
+      user: {
+        id: user.id,
+        email,
+        role: user.role,
+        tier: user.tier,
+      },
+      expires: '24h'
+    });
+
   } catch (error: any) {
     res.status(500).json({ 
-      error: 'Failed to revoke API key',
+      error: 'Authentication failed',
       message: error.message,
     });
   }
 });
 
-// Check API key usage/quota
-app.get('/api-keys/:keyId/usage', async (req, res) => {
-  try {
-    const { keyId } = req.params;
-    const quotaCheck = await apiKeyManager.checkQuota(keyId);
-    
-    res.json({
-      message: 'API key usage information',
-      ...quotaCheck,
-    });
-  } catch (error: any) {
-    res.status(500).json({ 
-      error: 'Failed to retrieve usage information',
-      message: error.message,
-    });
-  }
+// Verify JWT token
+app.get('/auth/verify', requireJWT(process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production'), (req, res) => {
+  res.json({
+    message: 'Token is valid',
+    user: req.user,
+    isAuthenticated: req.isJWTAuthenticated,
+  });
+});
+
+// Admin-only endpoint
+app.get('/admin/users', 
+  requireJWT(process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production'), 
+  requireRole(['admin']), 
+  (req, res) => {
+  res.json({
+    message: 'Admin endpoint accessed successfully',
+    user: req.user,
+    data: {
+      totalUsers: 1234,
+      activeUsers: 892,
+      premiumUsers: 156,
+    }
+  });
+});
+
+// Premium role endpoint
+app.get('/premium/features', 
+  requireJWT(process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production'), 
+  requireRole(['admin', 'premium']), 
+  (req, res) => {
+  res.json({
+    message: 'Premium features accessed',
+    user: req.user,
+    features: [
+      'Advanced Analytics',
+      'Priority Support',
+      'Custom Rate Limits',
+      'API Access'
+    ]
+  });
+});
+
+// Permission-based endpoint
+app.get('/secure/data', 
+  requireJWT(process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production'), 
+  requirePermission(['read', 'write']), 
+  (req, res) => {
+  res.json({
+    message: 'Secure data accessed',
+    user: req.user,
+    data: {
+      sensitive: 'This requires read and write permissions',
+      timestamp: new Date().toISOString(),
+    }
+  });
 });
 
 // Stats endpoint
@@ -436,6 +476,20 @@ app.get('/metrics/export', (req, res) => {
   }
 });
 
+// Test endpoint for JWT-aware rate limiting
+app.get('/test', (req, res) => {
+  res.json({ 
+    message: 'Test endpoint with JWT-aware rate limiting',
+    timestamp: new Date().toISOString(),
+    user: req.user || null,
+    rateLimitInfo: {
+      hasApiKey: !!req.apiKey,
+      hasJWT: !!req.user,
+      rateLimitApplied: req.apiKey ? 'API Key' : req.user ? 'JWT Role' : 'IP-based'
+    }
+  });
+});
+
 // Optimized rate limiter demo endpoints
 app.get('/demo/strict', createOptimizedRateLimiter(redis, RateLimitPresets.strict).middleware(), (req, res) => {
   res.json({ message: 'Strict rate limiting (10 req/min) - sliding window', timestamp: new Date().toISOString() });
@@ -461,6 +515,7 @@ app.post('/stats/reset', (req, res) => {
 
 // Apply middleware in order
 app.use(ipFilter);
+app.use(jwtAuth); // Add JWT authentication
 app.use(apiKeyAuth); // Add API key authentication
 app.use(rateLimitLogger);
 
@@ -484,16 +539,7 @@ app.use((req, res, next) => {
   });
 });
 
-// Test endpoint for trying out the rate limiter
-app.get('/test', (req, res) => {
-  res.json({
-    message: 'API Rate Limiter is working!',
-    timestamp: new Date().toISOString(),
-    path: req.path,
-    method: req.method,
-    ip: req.ip || req.connection.remoteAddress,
-  });
-});
+
 
 // Catch-all for other routes (optional proxy functionality)
 if (appConfig.proxy) {
@@ -507,6 +553,230 @@ if (appConfig.proxy) {
     });
   });
 }
+
+// API Key Management Endpoints
+
+// Get available tiers
+app.get('/api-keys/tiers', (req, res) => {
+  res.json({
+    message: 'Available API key tiers',
+    tiers: {
+      free: {
+        name: 'Free',
+        description: 'Basic rate limiting for free users',
+        quota: {
+          monthly: 10000,
+          daily: 1000,
+        },
+        rateLimit: {
+          windowMs: 60000, // 1 minute
+          maxRequests: 100,
+          algorithm: 'sliding-window' as const,
+        },
+      },
+      premium: {
+        name: 'Premium',
+        description: 'Enhanced rate limiting with burst capacity',
+        quota: {
+          monthly: 100000,
+          daily: 10000,
+        },
+        rateLimit: {
+          windowMs: 60000, // 1 minute
+          maxRequests: 1000,
+          algorithm: 'token-bucket' as const,
+          burstCapacity: 100,
+        },
+      },
+      enterprise: {
+        name: 'Enterprise',
+        description: 'High-performance rate limiting for enterprise',
+        quota: {
+          monthly: 1000000,
+          daily: 100000,
+        },
+        rateLimit: {
+          windowMs: 60000, // 1 minute
+          maxRequests: 10000,
+          algorithm: 'token-bucket' as const,
+          burstCapacity: 500,
+        },
+      },
+    },
+  });
+});
+
+// Generate new API key
+app.post('/api-keys', async (req, res): Promise<void> => {
+  try {
+    const { name, tier = 'free', userId, organizationId, metadata } = req.body;
+    
+    if (!name) {
+      res.status(400).json({ error: 'API key name is required' });
+      return;
+    }
+
+    const result = await apiKeyManager.generateApiKey({
+      name,
+      tier,
+      userId,
+      organizationId,
+      metadata: {
+        ...metadata,
+        userAgent: req.get('User-Agent'),
+        ipAddress: req.ip,
+      },
+    });
+
+    res.status(201).json({
+      message: 'API key generated successfully',
+      apiKey: result.apiKey,
+      metadata: result.metadata,
+    });
+
+  } catch (error: any) {
+    res.status(500).json({ 
+      error: 'Failed to generate API key',
+      message: error.message,
+    });
+  }
+});
+
+// List API keys for a user
+app.get('/api-keys', async (req, res): Promise<void> => {
+  try {
+    const { userId } = req.query;
+    
+    if (!userId) {
+      res.status(400).json({ error: 'userId parameter is required' });
+      return;
+    }
+
+    const keys = await apiKeyManager.getUserKeys(userId as string);
+
+    res.json({
+      message: 'API keys retrieved',
+      keys,
+    });
+
+  } catch (error: any) {
+    res.status(500).json({ 
+      error: 'Failed to retrieve API keys',
+      message: error.message,
+    });
+  }
+});
+
+// Get specific API key details
+app.get('/api-keys/:keyId', async (req, res): Promise<void> => {
+  try {
+    const { keyId } = req.params;
+    
+    const keyMetadata = await apiKeyManager.getKeyMetadata(keyId);
+    
+    if (!keyMetadata) {
+      res.status(404).json({ error: 'API key not found' });
+      return;
+    }
+
+    res.json({
+      message: 'API key details',
+      metadata: keyMetadata,
+    });
+
+  } catch (error: any) {
+    res.status(500).json({ 
+      error: 'Failed to retrieve API key details',
+      message: error.message,
+    });
+  }
+});
+
+// Revoke API key
+app.delete('/api-keys/:keyId', async (req, res): Promise<void> => {
+  try {
+    const { keyId } = req.params;
+    
+    const success = await apiKeyManager.revokeApiKey(keyId);
+    
+    if (!success) {
+      res.status(404).json({ error: 'API key not found or already revoked' });
+      return;
+    }
+
+    res.json({
+      message: 'API key revoked successfully',
+      keyId,
+    });
+
+  } catch (error: any) {
+    res.status(500).json({ 
+      error: 'Failed to revoke API key',
+      message: error.message,
+    });
+  }
+});
+
+// Get API key usage statistics
+app.get('/api-keys/:keyId/usage', async (req, res): Promise<void> => {
+  try {
+    const { keyId } = req.params;
+    
+    const quotaCheck = await apiKeyManager.checkQuota(keyId);
+    
+    res.json({
+      message: 'API key usage information',
+      ...quotaCheck,
+    });
+  } catch (error: any) {
+    res.status(500).json({ 
+      error: 'Failed to retrieve usage information',
+      message: error.message,
+    });
+  }
+});
+
+
+// Error handling middleware
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({
+    error: 'Internal server error',
+    message: process.env.NODE_ENV === 'development' ? err.message : undefined,
+  });
+});
+
+// Start server
+const server = app.listen(appConfig.server.port, appConfig.server.host, () => {
+  console.log(`🚀 API Rate Limiter started on ${appConfig.server.host}:${appConfig.server.port}`);
+  console.log(`📊 Redis: ${appConfig.redis.host}:${appConfig.redis.port}`);
+  console.log(`⚡ Default algorithm: ${appConfig.defaultRateLimit.algorithm}`);
+  console.log(`📝 Active rules: ${appConfig.rules.length}`);
+  console.log(`🔧 Performance monitoring: enabled`);
+  console.log(`🧹 Starting performance cleanup task...`);
+});
+
+// Start performance monitoring cleanup
+startPerformanceCleanup();
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('Received SIGTERM, shutting down gracefully...');
+  server.close(async () => {
+    await redis.disconnect();
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', async () => {
+  console.log('Received SIGINT, shutting down gracefully...');
+  server.close(async () => {
+    await redis.disconnect();
+    process.exit(0);
+  });
+});
+
+export default app;
 
 function loadRulesFromConfig(): RateLimitRule[] {
   // Load rules from environment or configuration file
@@ -550,44 +820,3 @@ function loadRulesFromConfig(): RateLimitRule[] {
     },
   ];
 }
-
-// Error handling middleware
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({
-    error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? err.message : undefined,
-  });
-});
-
-// Start server
-const server = app.listen(appConfig.server.port, appConfig.server.host, () => {
-  console.log(`🚀 API Rate Limiter started on ${appConfig.server.host}:${appConfig.server.port}`);
-  console.log(`📊 Redis: ${appConfig.redis.host}:${appConfig.redis.port}`);
-  console.log(`⚡ Default algorithm: ${appConfig.defaultRateLimit.algorithm}`);
-  console.log(`📝 Active rules: ${appConfig.rules.length}`);
-  console.log(`🔧 Performance monitoring: enabled`);
-  console.log(`🧹 Starting performance cleanup task...`);
-});
-
-// Start performance monitoring cleanup
-startPerformanceCleanup();
-
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('Received SIGTERM, shutting down gracefully...');
-  server.close(async () => {
-    await redis.disconnect();
-    process.exit(0);
-  });
-});
-
-process.on('SIGINT', async () => {
-  console.log('Received SIGINT, shutting down gracefully...');
-  server.close(async () => {
-    await redis.disconnect();
-    process.exit(0);
-  });
-});
-
-export default app;
