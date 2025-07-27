@@ -145,26 +145,26 @@ app.get('/stats', async (req, res) => {
 // Apply rate limiting to all other routes
 app.use(rateLimitMiddleware);
 
-// Proxy endpoint (if configured)
+// Test endpoint for trying out the rate limiter
+app.get('/test', (req, res) => {
+  res.json({
+    message: 'API Rate Limiter is working!',
+    timestamp: new Date().toISOString(),
+    path: req.path,
+    method: req.method,
+    ip: req.ip || req.connection.remoteAddress,
+  });
+});
+
+// Catch-all for other routes (optional proxy functionality)
 if (appConfig.proxy) {
-  app.use('/*', (req, res) => {
+  app.all('/:path(*)', (req, res) => {
     // Basic proxy implementation
     // In production, you might want to use http-proxy-middleware
     res.json({
       message: 'Proxy functionality - implement based on your needs',
       target: appConfig.proxy?.target,
       originalUrl: req.originalUrl,
-    });
-  });
-} else {
-  // Default endpoint for testing
-  app.get('/*', (req, res) => {
-    res.json({
-      message: 'API Rate Limiter is working!',
-      timestamp: new Date().toISOString(),
-      path: req.path,
-      method: req.method,
-      headers: req.headers,
     });
   });
 }
