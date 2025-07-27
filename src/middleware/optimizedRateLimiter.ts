@@ -45,34 +45,41 @@ export class OptimizedRateLimiter {
 
         switch (this.config.algorithm) {
           case 'token-bucket':
-            const tokenResult = await this.redis.executeTokenBucket(
+            const tokenResult = await this.redis.tokenBucket(
               key,
               this.config.burstCapacity!,
               this.config.tokensPerInterval!,
-              this.config.windowMs,
-              1
+              this.config.windowMs
             );
             result = {
               allowed: tokenResult.allowed,
-              remaining: tokenResult.tokensRemaining,
-              tokensRemaining: tokenResult.tokensRemaining
+              remaining: tokenResult.remainingTokens,
+              tokensRemaining: tokenResult.remainingTokens
             };
             break;
 
           case 'sliding-window':
-            result = await this.redis.executeSlidingWindow(
+            const slidingResult = await this.redis.slidingWindow(
               key,
               this.config.windowMs,
               this.config.maxRequests
             );
+            result = {
+              allowed: slidingResult.allowed,
+              remaining: slidingResult.remainingRequests
+            };
             break;
 
           case 'fixed-window':
-            result = await this.redis.executeFixedWindow(
+            const fixedResult = await this.redis.fixedWindow(
               key,
-              this.config.windowMs,
-              this.config.maxRequests
+              this.config.maxRequests,
+              this.config.windowMs
             );
+            result = {
+              allowed: fixedResult.allowed,
+              remaining: fixedResult.remainingRequests
+            };
             break;
 
           default:
@@ -180,7 +187,7 @@ export class OptimizedRateLimiter {
           break;
           
         case 'sliding-window':
-          current = await this.redis.zCard(key);
+          current = await this.redis.zcard(key);
           remaining = Math.max(0, this.config.maxRequests - current);
           break;
           
