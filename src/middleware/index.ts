@@ -14,7 +14,7 @@ export interface RateLimitMiddlewareOptions {
 export function createRateLimitMiddleware(options: RateLimitMiddlewareOptions) {
   const { redis, rules, defaultConfig, onLimitReached, keyGenerator } = options;
 
-  return async (req: Request, res: Response, next: NextFunction) => {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       // Find matching rule
       const matchedRule = findMatchingRule(req, rules);
@@ -52,7 +52,7 @@ export function createRateLimitMiddleware(options: RateLimitMiddlewareOptions) {
           config.onLimitReached(req, res);
         }
 
-        return res.status(429).json({
+        res.status(429).json({
           error: 'Too Many Requests',
           message: 'Rate limit exceeded',
           retryAfter: Math.ceil((stats.resetTime - Date.now()) / 1000),
@@ -60,6 +60,7 @@ export function createRateLimitMiddleware(options: RateLimitMiddlewareOptions) {
           windowMs: config.windowMs,
           algorithm: config.algorithm
         });
+        return;
       }
 
       // Request allowed, continue
@@ -113,12 +114,13 @@ function generateKey(req: Request, config: RateLimitConfig, keyGenerator?: (req:
 }
 
 export function createResetEndpoint(redis: RedisClient) {
-  return async (req: Request, res: Response) => {
+  return async (req: Request, res: Response): Promise<void> => {
     try {
       const { key } = req.params;
       
       if (!key) {
-        return res.status(400).json({ error: 'Key parameter is required' });
+        res.status(400).json({ error: 'Key parameter is required' });
+        return;
       }
 
       // Try to delete keys for all algorithms
