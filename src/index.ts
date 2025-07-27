@@ -2,9 +2,13 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import path from 'path';
 import { config } from 'dotenv';
 import { RedisClient } from './utils/redis';
+import { SimpleStats } from './utils/stats';
 import { createRateLimitMiddleware, createResetEndpoint } from './middleware';
+import { createIPFilterMiddleware } from './middleware/ipFilter';
+import { createRateLimitLogger } from './middleware/logger';
 import { ApiRateLimiterConfig, RateLimitRule } from './types';
 
 // Load environment variables
@@ -42,8 +46,21 @@ const appConfig: ApiRateLimiterConfig = {
   },
 };
 
-// Initialize Redis client
+// Initialize Redis client and stats
 const redis = new RedisClient(appConfig.redis);
+const stats = new SimpleStats();
+
+// Trust proxy (for accurate IP addresses)
+app.set('trust proxy', process.env.ENABLE_TRUST_PROXY === 'true');
+
+// IP Filter middleware
+const ipFilter = createIPFilterMiddleware({
+  whitelist: process.env.IP_WHITELIST ? process.env.IP_WHITELIST.split(',') : [],
+  blacklist: process.env.IP_BLACKLIST ? process.env.IP_BLACKLIST.split(',') : [],
+});
+
+// Request logger
+const rateLimitLogger = createRateLimitLogger();
 
 // Create rate limiting middleware
 const rateLimitMiddleware = createRateLimitMiddleware({
@@ -51,13 +68,19 @@ const rateLimitMiddleware = createRateLimitMiddleware({
   rules: appConfig.rules,
   defaultConfig: appConfig.defaultRateLimit,
   keyGenerator: (req) => {
+    // Skip rate limiting for whitelisted IPs
+    if (req.isWhitelisted) {
+      return 'whitelisted';
+    }
+    
     // Use API key if present, otherwise fall back to IP
-    const apiKey = req.headers['x-api-key'] as string;
+    const apiKey = req.headers[process.env.API_KEY_HEADER || 'x-api-key'] as string;
     const ip = req.ip || req.connection.remoteAddress || 'unknown';
     return apiKey ? `api:${apiKey}:${req.path}` : `ip:${ip}:${req.path}`;
   },
   onLimitReached: (req, res, rule) => {
-    console.log(`Rate limit exceeded for rule "${rule.name}" - ${req.method} ${req.path}`);
+    stats.recordRequest(req, true);
+    console.log(`🚫 Rate limit exceeded for rule "${rule.name}" - ${req.method} ${req.path}`);
   },
 });
 
@@ -71,6 +94,16 @@ app.get('/health', (req, res) => {
   };
 
   res.status(redis.isHealthy() ? 200 : 503).json(health);
+});
+
+// Dashboard endpoint
+app.get('/dashboard', (req, res) => {
+  res.sendFile(path.join(__dirname, '../dashboard.html'));
+});
+
+// Redirect root to dashboard
+app.get('/', (req, res) => {
+  res.redirect('/dashboard');
 });
 
 // Configuration endpoints
