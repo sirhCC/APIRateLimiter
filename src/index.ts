@@ -294,7 +294,7 @@ app.get('/api-keys', async (req, res): Promise<void> => {
 app.get('/api-keys/:keyId', async (req, res): Promise<void> => {
   try {
     const { keyId } = req.params;
-    const metadata = await apiKeyManager['getKeyMetadata'](keyId);
+    const metadata = await apiKeyManager.getKeyMetadata(keyId);
     
     if (!metadata) {
       res.status(404).json({ error: 'API key not found' });
