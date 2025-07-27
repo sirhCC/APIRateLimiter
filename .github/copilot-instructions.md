@@ -8,15 +8,16 @@ This is a standalone API Rate Limiter service built with Node.js, TypeScript, Ex
 - **Purpose**: Provide rate limiting as a service for any API
 - **Stack**: Node.js, TypeScript, Express, Redis, IORedis
 - **Algorithms**: Token Bucket, Sliding Window, Fixed Window
-- **Features**: Configurable rules, monitoring, proxy support, performance tracking
+- **Features**: Configurable rules, monitoring, proxy support, performance tracking, API key management
 
 ## Architecture & Data Flow
 - **Entry Point**: `src/index.ts` - Express server with middleware stack
-- **Middleware Chain**: Helmet → CORS → Performance Monitor → Morgan → JSON → IP Filter → Rate Limit Logger → Rate Limiter
+- **Middleware Chain**: Helmet → CORS → Performance Monitor → Morgan → JSON → IP Filter → API Key Auth → Rate Limit Logger → Rate Limiter
 - **Core Components**:
   - `src/utils/redis.ts` - Redis client with Lua scripts for atomic operations
   - `src/utils/stats.ts` - Circular buffers & LRU caches for efficient statistics
   - `src/utils/performance.ts` - Real-time performance monitoring
+  - `src/utils/apiKeys.ts` - API key generation, validation, and tier management
   - `src/middleware/` - Rate limiting algorithms and Express middleware
   - `src/types/` - TypeScript interfaces and type definitions
 
@@ -31,6 +32,12 @@ This is a standalone API Rate Limiter service built with Node.js, TypeScript, Ex
 1. **Token Bucket**: Allows bursts, good for APIs with varying load (`tokensPerInterval`, `burstCapacity`)
 2. **Sliding Window**: Precise control using Redis sorted sets with timestamp cleanup
 3. **Fixed Window**: Memory efficient with Redis counters and expiration
+
+## API Key Management
+- **Tiers**: Free (100/min), Premium (1000/min + burst), Enterprise (10000/min + burst)
+- **Features**: Quota tracking, usage analytics, tier-based rate limits, key generation/revocation
+- **Authentication**: Optional middleware with automatic tier detection and quota enforcement
+- **Storage**: Redis-backed with hashed keys, user indexing, and monthly quota tracking
 
 ## Development Workflow
 - **Dev Server**: `npm run dev` (nodemon with ts-node, auto-restart on changes)
@@ -55,6 +62,7 @@ This is a standalone API Rate Limiter service built with Node.js, TypeScript, Ex
 - **Real-time Metrics**: Response times (P50/P95/P99), memory usage, CPU trends
 - **Endpoints**: `/stats`, `/performance`, `/health`, `/metrics/export`
 - **Headers**: Standard rate limit headers (`X-RateLimit-*`) on all responses
+- **API Keys**: Usage tracking, quota monitoring, tier information in headers
 
 ## Code Style Guidelines
 - Use TypeScript strict mode
@@ -69,11 +77,14 @@ This is a standalone API Rate Limiter service built with Node.js, TypeScript, Ex
 - **Demo Endpoints**: `/demo/strict`, `/demo/moderate`, `/demo/heavy`, `/demo/interactive`
 - **Manual Testing**: Use curl to test rate limits, check headers
 - **Statistics**: `/stats` and `/performance` for real-time monitoring
+- **API Key Testing**: Generate keys via dashboard, test with `X-API-Key` header
 
 ## Key Files to Understand
 - `src/index.ts` - Main server setup and middleware configuration
 - `src/utils/stats.ts` - Performance-optimized statistics with circular buffers
 - `src/utils/redis.ts` - Redis client with Lua scripts for atomic operations
+- `src/utils/apiKeys.ts` - API key generation, validation, tier management, and usage tracking
+- `src/middleware/apiKeyAuth.ts` - API key authentication and quota enforcement middleware
 - `src/middleware/optimizedRateLimiter.ts` - High-performance rate limiter implementation
 - `src/types/index.ts` - All TypeScript interfaces and type definitions
 
