@@ -4,53 +4,70 @@ import Redis from 'ioredis';
  * High-performance Redis client with connection pooling and Lua scripts
  */
 export class RedisClient {
-  private client: Redis;
+  private client: Redis | null = null;
   private isConnected: boolean = false;
+  private isEnabled: boolean = true;
   private luaScripts: Map<string, string> = new Map();
 
-  constructor(config: { host: string; port: number; password?: string; db?: number }) {
-    this.client = new Redis({
-      host: config.host,
-      port: config.port,
-      password: config.password,
-      db: config.db || 0,
-      enableReadyCheck: true,
-      maxRetriesPerRequest: 3,
-      lazyConnect: true,
-      // Performance optimizations
-      enableOfflineQueue: false,
-      connectTimeout: 10000,
-      commandTimeout: 5000,
-      // Connection pooling
-      family: 4,
-      keepAlive: 30000,
-      // Pipeline optimizations
-      enableAutoPipelining: true,
-    });
+  constructor(config: { host: string; port: number; password?: string; db?: number; enabled?: boolean }) {
+    this.isEnabled = config.enabled !== false;
+    
+    if (this.isEnabled) {
+      this.client = new Redis({
+        host: config.host,
+        port: config.port,
+        password: config.password,
+        db: config.db || 0,
+        enableReadyCheck: true,
+        maxRetriesPerRequest: 3,
+        lazyConnect: true,
+        enableOfflineQueue: false,
+        connectTimeout: 10000,
+        commandTimeout: 5000,
+        family: 4,
+        keepAlive: 30000,
+        enableAutoPipelining: true,
+      });
 
-    this.client.on('connect', () => {
-      console.log('Connected to Redis');
-      this.isConnected = true;
-    });
+      this.client.on('connect', () => {
+        console.log('✅ Connected to Redis');
+        this.isConnected = true;
+      });
 
-    this.client.on('error', (error) => {
-      console.error('Redis connection error:', error);
-      this.isConnected = false;
-    });
+      this.client.on('error', (error) => {
+        console.error('❌ Redis connection error:', error);
+        this.isConnected = false;
+      });
 
-    this.client.on('close', () => {
-      console.log('Redis connection closed');
-      this.isConnected = false;
-    });
+      this.client.on('close', () => {
+        console.log('📡 Redis connection closed');
+        this.isConnected = false;
+      });
 
-    this.setupLuaScripts();
+      this.setupLuaScripts();
+    } else {
+      console.log('⚠️  Redis client disabled - using in-memory fallback');
+    }
   }
 
-  /**
-   * Setup pre-compiled Lua scripts for atomic operations
-   */
-  private setupLuaScripts() {
-    // Token bucket algorithm with atomic refill and consume
+  private isRedisAvailable(): boolean {
+    return this.isEnabled && this.client !== null && this.isConnected;
+  }
+
+  private async executeRedisOperation<T>(operation: () => Promise<T>, fallback: T): Promise<T> {
+    if (!this.isRedisAvailable()) {
+      return fallback;
+    }
+    
+    try {
+      return await operation();
+    } catch (error) {
+      console.error('Redis operation failed:', error);
+      return fallback;
+    }
+  }
+
+  private setupLuaScripts(): void {
     this.luaScripts.set('tokenBucket', `
       local key = KEYS[1]
       local capacity = tonumber(ARGV[1])
@@ -63,9 +80,8 @@ export class RedisClient {
       local current_tokens = tonumber(bucket[1]) or capacity
       local last_refill = tonumber(bucket[2]) or now
 
-      -- Calculate tokens to add based on time passed
-      local time_passed = math.max(0, now - last_refill)
-      local tokens_to_add = math.floor(time_passed / interval * tokens)
+      local elapsed = math.max(0, now - last_refill)
+      local tokens_to_add = math.floor(elapsed * tokens / interval)
       current_tokens = math.min(capacity, current_tokens + tokens_to_add)
 
       if current_tokens >= requested then
@@ -80,7 +96,6 @@ export class RedisClient {
       end
     `);
 
-    // Sliding window algorithm with automatic cleanup
     this.luaScripts.set('slidingWindow', `
       local key = KEYS[1]
       local window = tonumber(ARGV[1])
@@ -88,14 +103,10 @@ export class RedisClient {
       local now = tonumber(ARGV[3])
       local uuid = ARGV[4]
 
-      -- Remove old entries
       redis.call('ZREMRANGEBYSCORE', key, 0, now - window)
-      
-      -- Count current requests
       local current = redis.call('ZCARD', key)
       
       if current < limit then
-        -- Add new request
         redis.call('ZADD', key, now, uuid)
         redis.call('EXPIRE', key, math.ceil(window / 1000) + 1)
         return {1, limit - current - 1}
@@ -104,235 +115,178 @@ export class RedisClient {
       end
     `);
 
-    // Fixed window with atomic increment
     this.luaScripts.set('fixedWindow', `
       local key = KEYS[1]
       local limit = tonumber(ARGV[1])
       local window = tonumber(ARGV[2])
       local now = tonumber(ARGV[3])
 
-      local current_window = math.floor(now / window)
-      local window_key = key .. ':' .. current_window
-      
-      local current = redis.call('INCR', window_key)
-      if current == 1 then
+      local window_start = math.floor(now / window) * window
+      local window_key = key .. ':' .. window_start
+      local current = tonumber(redis.call('GET', window_key)) or 0
+
+      if current < limit then
+        local new_count = redis.call('INCR', window_key)
         redis.call('EXPIRE', window_key, math.ceil(window / 1000) + 1)
-      end
-      
-      if current <= limit then
-        return {1, limit - current}
+        return {1, limit - new_count, window_start + window}
       else
-        return {0, 0}
+        return {0, 0, window_start + window}
       end
     `);
   }
 
-  /**
-   * Execute token bucket algorithm atomically
-   */
-  async executeTokenBucket(
-    key: string, 
-    capacity: number, 
-    tokensPerInterval: number, 
-    intervalMs: number, 
-    requested: number = 1
-  ): Promise<{ allowed: boolean; tokensRemaining: number }> {
-    try {
-      const script = this.luaScripts.get('tokenBucket')!;
-      const result = await this.client.eval(
-        script,
-        1,
-        key,
-        capacity.toString(),
-        tokensPerInterval.toString(),
-        intervalMs.toString(),
-        requested.toString(),
-        Date.now().toString()
-      ) as [number, number];
-
-      return {
-        allowed: result[0] === 1,
-        tokensRemaining: result[1]
-      };
-    } catch (error) {
-      console.error('Redis token bucket error:', error);
-      return { allowed: false, tokensRemaining: 0 };
-    }
+  isHealthy(): boolean {
+    return this.isRedisAvailable();
   }
 
-  /**
-   * Execute sliding window algorithm atomically
-   */
-  async executeSlidingWindow(
-    key: string,
-    windowMs: number,
-    limit: number
-  ): Promise<{ allowed: boolean; remaining: number }> {
-    try {
-      const script = this.luaScripts.get('slidingWindow')!;
-      const uuid = `${Date.now()}-${Math.random()}`;
-      const result = await this.client.eval(
-        script,
-        1,
-        key,
-        windowMs.toString(),
-        limit.toString(),
-        Date.now().toString(),
-        uuid
-      ) as [number, number];
-
-      return {
-        allowed: result[0] === 1,
-        remaining: result[1]
-      };
-    } catch (error) {
-      console.error('Redis sliding window error:', error);
-      return { allowed: false, remaining: 0 };
-    }
+  async tokenBucket(key: string, capacity: number, tokens: number, intervalMs: number): Promise<{ allowed: boolean; remainingTokens: number }> {
+    return this.executeRedisOperation(
+      async () => {
+        const result = await this.client!.eval(
+          this.luaScripts.get('tokenBucket')!,
+          1,
+          key,
+          capacity,
+          tokens,
+          intervalMs,
+          Date.now()
+        ) as [number, number];
+        
+        return {
+          allowed: result[0] === 1,
+          remainingTokens: result[1]
+        };
+      },
+      { allowed: true, remainingTokens: capacity }
+    );
   }
 
-  /**
-   * Execute fixed window algorithm atomically
-   */
-  async executeFixedWindow(
-    key: string,
-    windowMs: number,
-    limit: number
-  ): Promise<{ allowed: boolean; remaining: number }> {
-    try {
-      const script = this.luaScripts.get('fixedWindow')!;
-      const result = await this.client.eval(
-        script,
-        1,
-        key,
-        limit.toString(),
-        windowMs.toString(),
-        Date.now().toString()
-      ) as [number, number];
-
-      return {
-        allowed: result[0] === 1,
-        remaining: result[1]
-      };
-    } catch (error) {
-      console.error('Redis fixed window error:', error);
-      return { allowed: false, remaining: 0 };
-    }
+  async slidingWindow(key: string, windowMs: number, limit: number): Promise<{ allowed: boolean; remainingRequests: number }> {
+    return this.executeRedisOperation(
+      async () => {
+        const uuid = `${Date.now()}-${Math.random()}`;
+        const result = await this.client!.eval(
+          this.luaScripts.get('slidingWindow')!,
+          1,
+          key,
+          windowMs,
+          limit,
+          Date.now(),
+          uuid
+        ) as [number, number];
+        
+        return {
+          allowed: result[0] === 1,
+          remainingRequests: result[1]
+        };
+      },
+      { allowed: true, remainingRequests: limit }
+    );
   }
 
-  /**
-   * Batch operations for better performance
-   */
-  async batchOperations(operations: Array<{ method: string; args: any[] }>): Promise<any[]> {
-    try {
-      const pipeline = this.client.pipeline();
-      
-      for (const op of operations) {
-        (pipeline as any)[op.method](...op.args);
-      }
-      
-      const results = await pipeline.exec();
-      return results?.map(([err, result]) => err ? null : result) || [];
-    } catch (error) {
-      console.error('Redis batch operations error:', error);
-      return [];
-    }
+  async fixedWindow(key: string, limit: number, windowMs: number): Promise<{ allowed: boolean; remainingRequests: number; resetTime: number }> {
+    return this.executeRedisOperation(
+      async () => {
+        const result = await this.client!.eval(
+          this.luaScripts.get('fixedWindow')!,
+          1,
+          key,
+          limit,
+          windowMs,
+          Date.now()
+        ) as [number, number, number];
+        
+        return {
+          allowed: result[0] === 1,
+          remainingRequests: result[1],
+          resetTime: result[2]
+        };
+      },
+      { allowed: true, remainingRequests: limit, resetTime: Date.now() + windowMs }
+    );
   }
 
   async get(key: string): Promise<string | null> {
-    try {
-      return await this.client.get(key);
-    } catch (error) {
-      console.error('Redis GET error:', error);
-      return null;
-    }
+    return this.executeRedisOperation(
+      async () => await this.client!.get(key),
+      null
+    );
   }
 
-  async set(key: string, value: string, ttlSeconds?: number): Promise<boolean> {
-    try {
-      if (ttlSeconds) {
-        await this.client.setex(key, ttlSeconds, value);
-      } else {
-        await this.client.set(key, value);
-      }
-      return true;
-    } catch (error) {
-      console.error('Redis SET error:', error);
-      return false;
-    }
+  async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
+    await this.executeRedisOperation(
+      async () => {
+        if (ttlSeconds) {
+          await this.client!.setex(key, ttlSeconds, value);
+        } else {
+          await this.client!.set(key, value);
+        }
+      },
+      undefined
+    );
   }
 
   async incr(key: string): Promise<number> {
-    try {
-      return await this.client.incr(key);
-    } catch (error) {
-      console.error('Redis INCR error:', error);
-      return 0;
-    }
+    return this.executeRedisOperation(
+      async () => await this.client!.incr(key),
+      1
+    );
   }
 
   async expire(key: string, seconds: number): Promise<boolean> {
-    try {
-      const result = await this.client.expire(key, seconds);
-      return result === 1;
-    } catch (error) {
-      console.error('Redis EXPIRE error:', error);
-      return false;
-    }
+    return this.executeRedisOperation(
+      async () => {
+        const result = await this.client!.expire(key, seconds);
+        return result === 1;
+      },
+      false
+    );
   }
 
   async ttl(key: string): Promise<number> {
-    try {
-      return await this.client.ttl(key);
-    } catch (error) {
-      console.error('Redis TTL error:', error);
-      return -1;
-    }
+    return this.executeRedisOperation(
+      async () => await this.client!.ttl(key),
+      -1
+    );
   }
 
   async del(key: string): Promise<boolean> {
-    try {
-      const result = await this.client.del(key);
-      return result > 0;
-    } catch (error) {
-      console.error('Redis DEL error:', error);
-      return false;
-    }
+    return this.executeRedisOperation(
+      async () => {
+        const result = await this.client!.del(key);
+        return result > 0;
+      },
+      false
+    );
   }
 
-  async zAdd(key: string, score: number, member: string): Promise<boolean> {
-    try {
-      const result = await this.client.zadd(key, score, member);
-      return result > 0;
-    } catch (error) {
-      console.error('Redis ZADD error:', error);
-      return false;
-    }
+  async zadd(key: string, score: number, member: string): Promise<boolean> {
+    return this.executeRedisOperation(
+      async () => {
+        const result = await this.client!.zadd(key, score, member);
+        return result > 0;
+      },
+      false
+    );
   }
 
-  async zRemRangeByScore(key: string, min: number, max: number): Promise<number> {
-    try {
-      return await this.client.zremrangebyscore(key, min, max);
-    } catch (error) {
-      console.error('Redis ZREMRANGEBYSCORE error:', error);
-      return 0;
-    }
+  async zremrangebyscore(key: string, min: number, max: number): Promise<number> {
+    return this.executeRedisOperation(
+      async () => await this.client!.zremrangebyscore(key, min, max),
+      0
+    );
   }
 
-  async zCard(key: string): Promise<number> {
-    try {
-      return await this.client.zcard(key);
-    } catch (error) {
-      console.error('Redis ZCARD error:', error);
-      return 0;
-    }
-  }
-
-  isHealthy(): boolean {
-    return this.isConnected;
+  async zcard(key: string): Promise<number> {
+    return this.executeRedisOperation(
+      async () => await this.client!.zcard(key),
+      0
+    );
   }
 
   async disconnect(): Promise<void> {
-    await this.client.quit();
+    if (this.client) {
+      await this.client.quit();
+    }
   }
 }
