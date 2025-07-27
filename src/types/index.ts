@@ -1,3 +1,13 @@
+import { Request } from 'express';
+
+declare global {
+  namespace Express {
+    interface Request {
+      isWhitelisted?: boolean;
+    }
+  }
+}
+
 export interface RateLimitConfig {
   windowMs: number; // Time window in milliseconds
   max: number; // Maximum number of requests per window
