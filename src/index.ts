@@ -6,9 +6,11 @@ import path from 'path';
 import { config } from 'dotenv';
 import { RedisClient } from './utils/redis';
 import { SimpleStats } from './utils/stats';
+import { performanceMonitor, startPerformanceCleanup } from './utils/performance';
 import { createRateLimitMiddleware, createResetEndpoint } from './middleware';
 import { createIPFilterMiddleware } from './middleware/ipFilter';
 import { createRateLimitLogger } from './middleware/logger';
+import { createOptimizedRateLimiter, RateLimitPresets } from './middleware/optimizedRateLimiter';
 import { ApiRateLimiterConfig, RateLimitRule } from './types';
 
 // Load environment variables
@@ -19,6 +21,7 @@ const app = express();
 // Middleware
 app.use(helmet());
 app.use(cors());
+app.use(performanceMonitor.middleware()); // Add performance monitoring
 app.use(morgan('combined'));
 app.use(express.json());
 
@@ -175,6 +178,72 @@ app.get('/stats', async (req, res) => {
   }
 });
 
+// Performance stats endpoint
+app.get('/performance', (req, res) => {
+  try {
+    const performanceStats = performanceMonitor.getStats();
+    res.json({
+      message: 'Performance Statistics',
+      timestamp: new Date().toISOString(),
+      performance: performanceStats,
+      system: performanceMonitor.getCurrentSystemMetrics(),
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get performance stats' });
+  }
+});
+
+// TODO: Fix endpoint-specific performance stats route
+// app.get('/performance/endpoint/*', (req, res) => {
+//   try {
+//     const endpoint = (req.params as any)[0]; // Get everything after /performance/endpoint/
+//     const endpointStats = performanceMonitor.getEndpointStats(decodeURIComponent(endpoint));
+    
+//     if (!endpointStats) {
+//       return res.status(404).json({ error: 'No performance data found for this endpoint' });
+//     }
+
+//     return res.json({
+//       message: `Performance statistics for ${endpoint}`,
+//       timestamp: new Date().toISOString(),
+//       endpoint,
+//       stats: endpointStats,
+//     });
+//   } catch (error) {
+//     return res.status(500).json({ error: 'Failed to get endpoint performance stats' });
+//   }
+// });
+
+// Export all performance metrics
+app.get('/metrics/export', (req, res) => {
+  try {
+    const exportData = performanceMonitor.exportMetrics();
+    res.json({
+      message: 'Performance metrics export',
+      data: exportData,
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to export metrics' });
+  }
+});
+
+// Optimized rate limiter demo endpoints
+app.get('/demo/strict', createOptimizedRateLimiter(redis, RateLimitPresets.strict).middleware(), (req, res) => {
+  res.json({ message: 'Strict rate limiting (10 req/min) - sliding window', timestamp: new Date().toISOString() });
+});
+
+app.get('/demo/moderate', createOptimizedRateLimiter(redis, RateLimitPresets.moderate).middleware(), (req, res) => {
+  res.json({ message: 'Moderate rate limiting (100 req/min) - token bucket with burst', timestamp: new Date().toISOString() });
+});
+
+app.get('/demo/heavy', createOptimizedRateLimiter(redis, RateLimitPresets.heavy).middleware(), (req, res) => {
+  res.json({ message: 'Heavy operation rate limiting (5 req/min) - fixed window', timestamp: new Date().toISOString() });
+});
+
+app.get('/demo/interactive', createOptimizedRateLimiter(redis, RateLimitPresets.interactive).middleware(), (req, res) => {
+  res.json({ message: 'Interactive rate limiting (200 req/min) - token bucket with large burst', timestamp: new Date().toISOString() });
+});
+
 // Reset stats endpoint
 app.post('/stats/reset', (req, res) => {
   stats.reset();
@@ -215,7 +284,7 @@ app.get('/test', (req, res) => {
 
 // Catch-all for other routes (optional proxy functionality)
 if (appConfig.proxy) {
-  app.all('/:path(*)', (req, res) => {
+  app.all('*', (req, res) => {
     // Basic proxy implementation
     // In production, you might want to use http-proxy-middleware
     res.json({
@@ -284,7 +353,12 @@ const server = app.listen(appConfig.server.port, appConfig.server.host, () => {
   console.log(`📊 Redis: ${appConfig.redis.host}:${appConfig.redis.port}`);
   console.log(`⚡ Default algorithm: ${appConfig.defaultRateLimit.algorithm}`);
   console.log(`📝 Active rules: ${appConfig.rules.length}`);
+  console.log(`🔧 Performance monitoring: enabled`);
+  console.log(`🧹 Starting performance cleanup task...`);
 });
+
+// Start performance monitoring cleanup
+startPerformanceCleanup();
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
