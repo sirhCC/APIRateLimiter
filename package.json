@@ -10,7 +10,9 @@
     "clean": "rm -rf dist",
     "prepublish": "npm run clean && npm run build",
     "test": "node test-setup.js",
-    "test:setup": "echo \"Make sure Redis is running, then run 'npm run dev' in another terminal and 'npm test'\""
+    "test:setup": "echo \"Make sure Redis is running, then run 'npm run dev' in another terminal and 'npm test'\"",
+    "setup:production": "node production-setup.js",
+    "setup": "node production-setup.js"
   },
   "keywords": [
     "rate-limiting",
