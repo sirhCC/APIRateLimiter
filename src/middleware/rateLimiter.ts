@@ -89,15 +89,15 @@ export class SlidingWindowLimiter extends RateLimiter {
     const windowStart = now - this.config.windowMs;
 
     // Remove old entries
-    await this.redis.zRemRangeByScore(windowKey, 0, windowStart);
+    await this.redis.zremrangebyscore(windowKey, 0, windowStart);
 
     // Count current requests
-    const currentCount = await this.redis.zCard(windowKey);
+    const currentCount = await this.redis.zcard(windowKey);
     const allowed = currentCount < this.config.max;
 
     if (allowed) {
       // Add current request
-      await this.redis.zAdd(windowKey, now, `${now}-${Math.random()}`);
+      await this.redis.zadd(windowKey, now, `${now}-${Math.random()}`);
       await this.redis.expire(windowKey, Math.ceil(this.config.windowMs / 1000));
     }
 
