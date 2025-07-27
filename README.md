@@ -32,6 +32,14 @@ A standalone, Redis-backed rate limiting service that can protect any API with c
   - Reset capabilities
   - Health status reporting
 
+- **API Key Management**
+  - Tiered access control (Free, Premium, Enterprise)
+  - Usage tracking and quota enforcement
+  - Monthly quota limits with automatic reset
+  - Secure key generation with SHA-256 hashing
+  - User-based key organization and management
+  - Real-time usage statistics and monitoring
+
 ## Quick Start
 
 ### Prerequisites
@@ -183,6 +191,81 @@ GET /stats
 ```
 
 Get rate limiting statistics (extend as needed).
+
+## API Key Management
+
+The rate limiter supports tiered API key authentication with automatic quota enforcement and usage tracking.
+
+### Available Tiers
+
+- **Free**: 100 requests/minute, 10,000 requests/month
+- **Premium**: 1,000 requests/minute with burst capacity, 100,000 requests/month
+- **Enterprise**: 10,000 requests/minute with burst capacity, 1,000,000 requests/month
+
+### API Key Endpoints
+
+#### Generate API Key
+```http
+POST /api-keys
+Content-Type: application/json
+
+{
+  "name": "My API Key",
+  "tier": "premium",
+  "userId": "user123",
+  "organizationId": "org456",
+  "metadata": {
+    "description": "Key for production API"
+  }
+}
+```
+
+#### List User's API Keys
+```http
+GET /api-keys?userId=user123
+```
+
+#### Get API Key Details
+```http
+GET /api-keys/:keyId
+```
+
+#### Revoke API Key
+```http
+DELETE /api-keys/:keyId
+```
+
+#### Get Available Tiers
+```http
+GET /api-keys/tiers
+```
+
+#### Check API Key Usage
+```http
+GET /api-keys/:keyId/usage
+```
+
+### Using API Keys
+
+Include your API key in requests using the `X-API-Key` header:
+
+```http
+GET /your-api-endpoint
+X-API-Key: rl_abc123def456_your_secure_api_key_here
+```
+
+When an API key is provided:
+- Rate limits are applied based on the key's tier
+- Usage is tracked and counted against monthly quotas
+- Additional headers are returned with tier and quota information
+
+### API Key Management Dashboard
+
+Access the dashboard at `/dashboard` to:
+- Generate new API keys
+- View usage statistics
+- Manage user keys
+- Monitor tier information
 
 ## Usage Examples
 
