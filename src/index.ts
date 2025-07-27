@@ -290,6 +290,22 @@ app.get('/api-keys', async (req, res): Promise<void> => {
   }
 });
 
+// Get available tiers (must be before /:keyId route)
+app.get('/api-keys/tiers', (req, res) => {
+  try {
+    const tiers = apiKeyManager.getTiers();
+    res.json({
+      message: 'Available API key tiers',
+      tiers,
+    });
+  } catch (error: any) {
+    res.status(500).json({ 
+      error: 'Failed to retrieve tiers',
+      message: error.message,
+    });
+  }
+});
+
 // Get API key details (for authenticated requests)
 app.get('/api-keys/:keyId', async (req, res): Promise<void> => {
   try {
@@ -334,22 +350,6 @@ app.delete('/api-keys/:keyId', async (req, res): Promise<void> => {
   } catch (error: any) {
     res.status(500).json({ 
       error: 'Failed to revoke API key',
-      message: error.message,
-    });
-  }
-});
-
-// Get available tiers
-app.get('/api-keys/tiers', (req, res) => {
-  try {
-    const tiers = apiKeyManager.getTiers();
-    res.json({
-      message: 'Available API key tiers',
-      tiers,
-    });
-  } catch (error: any) {
-    res.status(500).json({ 
-      error: 'Failed to retrieve tiers',
       message: error.message,
     });
   }
