@@ -59,8 +59,8 @@ const ipFilter = createIPFilterMiddleware({
   blacklist: process.env.IP_BLACKLIST ? process.env.IP_BLACKLIST.split(',') : [],
 });
 
-// Request logger
-const rateLimitLogger = createRateLimitLogger();
+// Request logger with stats integration
+const rateLimitLogger = createRateLimitLogger(stats);
 
 // Create rate limiting middleware
 const rateLimitMiddleware = createRateLimitMiddleware({
