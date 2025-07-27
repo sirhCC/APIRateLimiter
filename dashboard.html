@@ -82,6 +82,50 @@
             <h2>Default Configuration</h2>
             <div id="defaultConfig">Loading...</div>
         </div>
+
+        <!-- API Key Management Section -->
+        <div class="card">
+            <h2>🔑 API Key Management</h2>
+            
+            <!-- API Key Generation Form -->
+            <div style="margin-bottom: 20px;">
+                <h3>Generate New API Key</h3>
+                <form id="generateKeyForm" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 10px;">
+                    <input type="text" id="keyName" placeholder="API Key Name" required>
+                    <select id="keyTier" required>
+                        <option value="">Select Tier</option>
+                        <option value="free">Free</option>
+                        <option value="premium">Premium</option>
+                        <option value="enterprise">Enterprise</option>
+                    </select>
+                    <input type="text" id="userId" placeholder="User ID (optional)">
+                    <button type="submit" style="background: #4CAF50; color: white; border: none; padding: 10px; border-radius: 4px;">Generate Key</button>
+                </form>
+                <div id="generatedKey" style="display: none; background: #e8f5e8; padding: 10px; border-radius: 4px; margin-top: 10px;">
+                    <strong>Generated API Key:</strong>
+                    <code id="newApiKey" style="background: white; padding: 5px; border-radius: 3px; display: block; margin-top: 5px; word-break: break-all;"></code>
+                    <small style="color: #666;">⚠️ Save this key securely - it won't be shown again!</small>
+                </div>
+            </div>
+
+            <!-- User Keys Lookup -->
+            <div style="margin-bottom: 20px;">
+                <h3>View User's API Keys</h3>
+                <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                    <input type="text" id="lookupUserId" placeholder="Enter User ID" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    <button onclick="lookupUserKeys()" style="background: #2196F3; color: white; border: none; padding: 8px 16px; border-radius: 4px;">Lookup Keys</button>
+                </div>
+                <div id="userKeysResult"></div>
+            </div>
+
+            <!-- Available Tiers -->
+            <div>
+                <h3>Available Tiers</h3>
+                <div id="tiersInfo" class="grid">
+                    <!-- Tiers will be loaded here -->
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -162,6 +206,217 @@
         // Initial load and auto-refresh
         refreshData();
         setInterval(refreshData, 30000); // Refresh every 30 seconds
+
+        // API Key Management
+        document.getElementById('generateKeyForm').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            
+            const keyName = document.getElementById('keyName').value;
+            const keyTier = document.getElementById('keyTier').value;
+            const userId = document.getElementById('userId').value;
+            
+            try {
+                const response = await fetch('/generate-key', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ keyName, keyTier, userId })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    document.getElementById('newApiKey').textContent = result.apiKey;
+                    document.getElementById('generatedKey').style.display = 'block';
+                } else {
+                    alert('Error generating key: ' + result.message);
+                }
+            } catch (error) {
+                console.error('Error generating API key:', error);
+            }
+        });
+
+        async function lookupUserKeys() {
+            const userId = document.getElementById('lookupUserId').value;
+            const resultDiv = document.getElementById('userKeysResult');
+            resultDiv.innerHTML = 'Loading...';
+            
+            try {
+                const response = await fetch('/user-keys/' + encodeURIComponent(userId));
+                const result = await response.json();
+                
+                if (result.success) {
+                    resultDiv.innerHTML = result.keys.length > 0 ? 
+                        result.keys.map(key => `<div style="padding: 10px; border: 1px solid #ddd; border-radius: 4px; margin-top: 10px;">
+                            <strong>Key:</strong> <code style="word-break: break-all;">${key.key}</code><br>
+                            <strong>Status:</strong> ${key.enabled ? '<span class="status healthy">ENABLED</span>' : '<span class="status unhealthy">DISABLED</span>'}<br>
+                            <strong>Limits:</strong> ${key.config.max}/${key.config.windowMs/1000}s<br>
+                            <strong>Algorithm:</strong> ${key.config.algorithm}<br>
+                            <strong>Created:</strong> ${new Date(key.createdAt).toLocaleString()}
+                        </div>`).join('') : 'No keys found for this user.';
+                } else {
+                    resultDiv.innerHTML = 'Error fetching keys: ' + result.message;
+                }
+            } catch (error) {
+                console.error('Error fetching user keys:', error);
+                resultDiv.innerHTML = 'Error fetching keys. Please try again later.';
+            }
+        }
+
+        // Load available tiers on dashboard load
+        (async function loadTiers() {
+            const tiersInfo = document.getElementById('tiersInfo');
+            tiersInfo.innerHTML = 'Loading...';
+            
+            try {
+                const response = await fetch('/tiers');
+                const result = await response.json();
+                
+                if (result.success) {
+                    tiersInfo.innerHTML = result.tiers.map(tier => `
+                        <div style="padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                            <strong>${tier.name}</strong><br>
+                            <em>${tier.description}</em><br>
+                            <strong>Limits:</strong> ${tier.config.max}/${tier.config.windowMs/1000}s<br>
+                            <strong>Algorithm:</strong> ${tier.config.algorithm}
+                        </div>
+                    `).join('');
+                } else {
+                    tiersInfo.innerHTML = 'Error loading tiers: ' + result.message;
+                }
+            } catch (error) {
+                console.error('Error loading tiers:', error);
+                tiersInfo.innerHTML = 'Error loading tiers. Please try again later.';
+            }
+        
+        // API Key Management Functions
+        document.getElementById('generateKeyForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const name = document.getElementById('keyName').value;
+            const tier = document.getElementById('keyTier').value;
+            const userId = document.getElementById('userId').value;
+            
+            try {
+                const response = await fetch('/api-keys', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name,
+                        tier,
+                        userId: userId || undefined,
+                    }),
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    // Show the generated key
+                    document.getElementById('newApiKey').textContent = result.apiKey;
+                    document.getElementById('generatedKey').style.display = 'block';
+                    
+                    // Reset form
+                    document.getElementById('generateKeyForm').reset();
+                    
+                    // Auto-hide after 30 seconds
+                    setTimeout(() => {
+                        document.getElementById('generatedKey').style.display = 'none';
+                    }, 30000);
+                } else {
+                    alert('Error generating API key: ' + result.message);
+                }
+            } catch (error) {
+                console.error('Error generating API key:', error);
+                alert('Error generating API key. Please try again.');
+            }
+        });
+        
+        async function lookupUserKeys() {
+            const userId = document.getElementById('lookupUserId').value;
+            if (!userId) {
+                alert('Please enter a User ID');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api-keys?userId=${encodeURIComponent(userId)}`);
+                const result = await response.json();
+                
+                const resultDiv = document.getElementById('userKeysResult');
+                
+                if (response.ok) {
+                    if (result.keys.length === 0) {
+                        resultDiv.innerHTML = '<p>No API keys found for this user.</p>';
+                    } else {
+                        resultDiv.innerHTML = `
+                            <table class="rules-table">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Tier</th>
+                                        <th>Created</th>
+                                        <th>Last Used</th>
+                                        <th>Status</th>
+                                        <th>Usage</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${result.keys.map(key => `
+                                        <tr>
+                                            <td>${key.name}</td>
+                                            <td>${key.tier}</td>
+                                            <td>${new Date(key.created).toLocaleDateString()}</td>
+                                            <td>${key.lastUsed ? new Date(key.lastUsed).toLocaleDateString() : 'Never'}</td>
+                                            <td class="${key.isActive ? 'enabled' : 'disabled'}">${key.isActive ? 'Active' : 'Revoked'}</td>
+                                            <td>${key.usage.currentMonthRequests} / ${key.usage.totalRequests} total</td>
+                                            <td>
+                                                ${key.isActive ? `<button onclick="revokeKey('${key.id}')" style="background: #f44336; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer;">Revoke</button>` : ''}
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        `;
+                    }
+                } else {
+                    resultDiv.innerHTML = `<p style="color: #f44336;">Error: ${result.message}</p>`;
+                }
+            } catch (error) {
+                console.error('Error looking up user keys:', error);
+                document.getElementById('userKeysResult').innerHTML = '<p style="color: #f44336;">Error looking up keys. Please try again.</p>';
+            }
+        }
+        
+        async function revokeKey(keyId) {
+            if (!confirm('Are you sure you want to revoke this API key? This action cannot be undone.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api-keys/${keyId}`, {
+                    method: 'DELETE',
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    alert('API key revoked successfully');
+                    // Refresh the user keys if they're currently displayed
+                    const userId = document.getElementById('lookupUserId').value;
+                    if (userId) {
+                        lookupUserKeys();
+                    }
+                } else {
+                    alert('Error revoking API key: ' + result.message);
+                }
+            } catch (error) {
+                console.error('Error revoking API key:', error);
+                alert('Error revoking API key. Please try again.');
+            }
+        }
+
+        })();
     </script>
 </body>
 </html>
