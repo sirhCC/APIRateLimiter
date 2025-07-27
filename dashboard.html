@@ -126,6 +126,64 @@
                 </div>
             </div>
         </div>
+
+        <!-- JWT Authentication Section -->
+        <div class="card">
+            <h2>🔐 JWT Authentication</h2>
+            
+            <!-- JWT Login Form -->
+            <div style="margin-bottom: 20px;">
+                <h3>Login with JWT</h3>
+                <form id="jwtLoginForm" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 10px;">
+                    <select id="loginEmail" required>
+                        <option value="">Select Demo User</option>
+                        <option value="admin@example.com">Admin User</option>
+                        <option value="premium@example.com">Premium User</option>
+                        <option value="user@example.com">Standard User</option>
+                        <option value="guest@example.com">Guest User</option>
+                    </select>
+                    <input type="password" id="loginPassword" placeholder="Password (demo123)" value="demo123" required>
+                    <button type="submit" style="background: #9C27B0; color: white; border: none; padding: 10px; border-radius: 4px;">Login</button>
+                </form>
+                <div id="loginResult" style="display: none; background: #e8f5e8; padding: 10px; border-radius: 4px; margin-top: 10px;">
+                    <strong>JWT Token:</strong>
+                    <code id="jwtToken" style="background: white; padding: 5px; border-radius: 3px; display: block; margin-top: 5px; word-break: break-all;"></code>
+                    <div style="margin-top: 10px;">
+                        <strong>User Info:</strong>
+                        <div id="userInfo"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- JWT Test Actions -->
+            <div style="margin-bottom: 20px;">
+                <h3>Test JWT Endpoints</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+                    <button onclick="verifyToken()" style="background: #2196F3; color: white; border: none; padding: 8px 16px; border-radius: 4px;">Verify Token</button>
+                    <button onclick="testAdminEndpoint()" style="background: #F44336; color: white; border: none; padding: 8px 16px; border-radius: 4px;">Test Admin</button>
+                    <button onclick="testPremiumEndpoint()" style="background: #FF9800; color: white; border: none; padding: 8px 16px; border-radius: 4px;">Test Premium</button>
+                    <button onclick="testSecureEndpoint()" style="background: #795548; color: white; border: none; padding: 8px 16px; border-radius: 4px;">Test Secure</button>
+                    <button onclick="clearToken()" style="background: #607D8B; color: white; border: none; padding: 8px 16px; border-radius: 4px;">Clear Token</button>
+                </div>
+                <div id="jwtTestResult" style="margin-top: 10px;"></div>
+            </div>
+
+            <!-- JWT Info -->
+            <div>
+                <h3>JWT Authentication Info</h3>
+                <div style="background: #f9f9f9; padding: 15px; border-radius: 4px;">
+                    <p><strong>Demo Users:</strong></p>
+                    <ul style="margin: 10px 0;">
+                        <li><code>admin@example.com</code> - Full admin access, highest rate limits</li>
+                        <li><code>premium@example.com</code> - Premium features, higher rate limits</li>
+                        <li><code>user@example.com</code> - Standard user access, normal rate limits</li>
+                        <li><code>guest@example.com</code> - Limited access, lower rate limits</li>
+                    </ul>
+                    <p><strong>Password:</strong> <code>demo123</code> (for all demo users)</p>
+                    <p><strong>Features:</strong> Role-based access control, permission-based endpoints, dynamic rate limiting based on user role</p>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -416,7 +474,113 @@
             }
         }
 
-        })();
+        // JWT Authentication
+        document.getElementById('jwtLoginForm').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    document.getElementById('jwtToken').textContent = result.token;
+                    document.getElementById('userInfo').innerHTML = `
+                        <p><strong>Email:</strong> ${result.user.email}</p>
+                        <p><strong>Role:</strong> ${result.user.role}</p>
+                        <p><strong>Tier:</strong> ${result.user.tier}</p>
+                    `;
+                    document.getElementById('loginResult').style.display = 'block';
+                } else {
+                    alert('Error logging in: ' + result.message);
+                }
+            } catch (error) {
+                console.error('Error during login:', error);
+            }
+        });
+
+        async function verifyToken() {
+            const token = document.getElementById('jwtToken').textContent;
+            if (!token) {
+                alert('Please login first to get a JWT token');
+                return;
+            }
+            
+            const resultDiv = document.getElementById('jwtTestResult');
+            resultDiv.innerHTML = 'Verifying token...';
+            
+            try {
+                const response = await fetch('/auth/verify', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                const result = await response.json();
+                if (response.ok) {
+                    resultDiv.innerHTML = `<span style="color: #4CAF50;">✅ Token is valid! User: ${result.user.email} (${result.user.role})</span>`;
+                } else {
+                    resultDiv.innerHTML = `<span style="color: #f44336;">❌ Invalid token: ${result.message}</span>`;
+                }
+            } catch (error) {
+                console.error('Error verifying token:', error);
+                resultDiv.innerHTML = '<span style="color: #f44336;">❌ Error verifying token. Please try again.</span>';
+            }
+        }
+
+        async function testAdminEndpoint() {
+            await testJWTEndpoint('/admin/users', 'Admin');
+        }
+
+        async function testPremiumEndpoint() {
+            await testJWTEndpoint('/premium/features', 'Premium');
+        }
+
+        async function testSecureEndpoint() {
+            await testJWTEndpoint('/secure/data', 'Secure');
+        }
+
+        async function testJWTEndpoint(endpoint, name) {
+            const token = document.getElementById('jwtToken').textContent;
+            if (!token) {
+                alert('Please login first to get a JWT token');
+                return;
+            }
+            
+            const resultDiv = document.getElementById('jwtTestResult');
+            resultDiv.innerHTML = `Testing ${name} endpoint...`;
+            
+            try {
+                const response = await fetch(endpoint, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                const result = await response.json();
+                if (response.ok) {
+                    resultDiv.innerHTML = `<span style="color: #4CAF50;">✅ ${name} endpoint test successful! ${JSON.stringify(result.data || result.message)}</span>`;
+                } else {
+                    resultDiv.innerHTML = `<span style="color: #f44336;">❌ ${name} endpoint test failed: ${result.message}</span>`;
+                }
+            } catch (error) {
+                console.error(`Error testing ${name} endpoint:`, error);
+                resultDiv.innerHTML = `<span style="color: #f44336;">❌ Error testing ${name} endpoint. Please try again.</span>`;
+            }
+        }
+
+        function clearToken() {
+            document.getElementById('jwtToken').textContent = '';
+            document.getElementById('userInfo').innerHTML = '';
+            document.getElementById('loginResult').style.display = 'none';
+            document.getElementById('jwtTestResult').innerHTML = '';
+        }
     </script>
 </body>
 </html>
