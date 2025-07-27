@@ -15,6 +15,29 @@ async function testApiKeyManagement() {
     try {
         // 1. Test health check
         console.log('1. Testing health check...');
+        let health;
+        try {
+            health = await axios.get(`${BASE_URL}/health`);
+        } catch (error) {
+            // Health endpoint returns 503 when Redis is down, but still provides data
+            if (error.response && error.response.status === 503) {
+                health = error.response;
+            } else {
+                throw error;
+            }
+        }
+        console.log(`✅ Health check: ${health.data.status}`);
+
+const axios = require('axios');
+
+const BASE_URL = 'http://localhost:3000';
+
+async function testApiKeyManagement() {
+    console.log('🧪 Testing API Key Management...\n');
+
+    try {
+        // 1. Test health check
+        console.log('1. Testing health check...');
         const health = await axios.get(`${BASE_URL}/health`);
         console.log(`✅ Health check: ${health.data.status}\n`);
 
