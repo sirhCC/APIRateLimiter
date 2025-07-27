@@ -147,7 +147,7 @@ app.use(rateLimitMiddleware);
 
 // Proxy endpoint (if configured)
 if (appConfig.proxy) {
-  app.use('*', (req, res) => {
+  app.use('/*', (req, res) => {
     // Basic proxy implementation
     // In production, you might want to use http-proxy-middleware
     res.json({
@@ -158,7 +158,7 @@ if (appConfig.proxy) {
   });
 } else {
   // Default endpoint for testing
-  app.get('*', (req, res) => {
+  app.get('/*', (req, res) => {
     res.json({
       message: 'API Rate Limiter is working!',
       timestamp: new Date().toISOString(),
