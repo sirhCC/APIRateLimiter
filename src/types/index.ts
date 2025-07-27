@@ -1,9 +1,13 @@
 import { Request } from 'express';
+import { ApiKeyMetadata } from '../utils/apiKeys';
+import { ApiKeyMetadata } from '../utils/apiKeys';
 
 declare global {
   namespace Express {
     interface Request {
       isWhitelisted?: boolean;
+      apiKey?: ApiKeyMetadata;
+      isApiKeyAuthenticated?: boolean;
     }
   }
 }
