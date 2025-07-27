@@ -164,19 +164,43 @@ app.post('/reset/:key', createResetEndpoint(redis));
 // Stats endpoint
 app.get('/stats', async (req, res) => {
   try {
-    // This is a basic implementation - you could extend this
-    // to provide detailed statistics from Redis
+    const simpleStats = stats.getStats();
     res.json({
-      message: 'Stats endpoint - implement detailed statistics as needed',
+      message: 'API Rate Limiter Statistics',
       timestamp: new Date().toISOString(),
+      stats: simpleStats,
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get stats' });
   }
 });
 
+// Reset stats endpoint
+app.post('/stats/reset', (req, res) => {
+  stats.reset();
+  res.json({ message: 'Statistics reset successfully' });
+});
+
+// Apply middleware in order
+app.use(ipFilter);
+app.use(rateLimitLogger);
+
 // Apply rate limiting to all other routes
-app.use(rateLimitMiddleware);
+app.use((req, res, next) => {
+  // Skip rate limiting for whitelisted IPs
+  if (req.isWhitelisted) {
+    stats.recordRequest(req, false);
+    return next();
+  }
+  
+  // Apply rate limiting
+  rateLimitMiddleware(req, res, (err) => {
+    if (!err && res.statusCode !== 429) {
+      stats.recordRequest(req, false);
+    }
+    next(err);
+  });
+});
 
 // Test endpoint for trying out the rate limiter
 app.get('/test', (req, res) => {
