@@ -68,6 +68,7 @@ export interface ApiRateLimiterConfig {
     port: number;
     password?: string;
     db?: number;
+    enabled?: boolean;
   };
   server: {
     port: number;
@@ -79,5 +80,14 @@ export interface ApiRateLimiterConfig {
   monitoring: {
     enabled: boolean;
     statsRetentionMs: number;
+  };
+  security: {
+    jwtSecret: string;
+    jwtExpiresIn: string;
+    jwtAlgorithm: string;
+    demoUsersEnabled: boolean;
+    corsOrigin: string;
+    logAuthEvents: boolean;
+    logRateLimitViolations: boolean;
   };
 }
