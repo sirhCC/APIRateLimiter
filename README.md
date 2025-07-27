@@ -4,29 +4,29 @@ A standalone, Redis-backed rate limiting service that can protect any API with c
 
 ## Features
 
-- 🚀 **Multiple Rate Limiting Algorithms**
+- **Multiple Rate Limiting Algorithms**
   - Token Bucket (allows bursts, good for varying loads)
   - Sliding Window (precise control, prevents burst attacks)
   - Fixed Window (simple, memory efficient)
 
-- 🔧 **Configurable Rules**
+- **Configurable Rules**
   - URL pattern matching with regex
   - HTTP method filtering
   - Priority-based rule matching
   - Dynamic rule management via REST API
 
-- 📊 **Redis-Backed**
+- **Redis-Backed**
   - Distributed rate limiting across multiple instances
   - Persistent state between restarts
   - High performance with Redis
 
-- 🛡️ **Production Ready**
+- **Production Ready**
   - Health checks and monitoring
   - Graceful shutdown
   - Comprehensive error handling
   - Security headers with Helmet.js
 
-- 🔍 **Monitoring & Management**
+- **Monitoring & Management**
   - Rate limit statistics
   - Rule management endpoints
   - Reset capabilities
@@ -285,4 +285,4 @@ If you encounter any issues or have questions, please file an issue on GitHub.
 
 ---
 
-**Made with ❤️ for the developer community**
+**Made with care for the developer community**
