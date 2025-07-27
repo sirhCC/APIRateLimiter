@@ -1,6 +1,5 @@
 import { Request } from 'express';
 import { ApiKeyMetadata } from '../utils/apiKeys';
-import { ApiKeyMetadata } from '../utils/apiKeys';
 
 declare global {
   namespace Express {
