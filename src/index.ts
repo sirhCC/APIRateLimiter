@@ -227,12 +227,13 @@ app.post('/reset/:key', createResetEndpoint(redis));
 // API Key Management Endpoints
 
 // Generate new API key
-app.post('/api-keys', async (req, res) => {
+app.post('/api-keys', async (req, res): Promise<void> => {
   try {
     const { name, tier = 'free', userId, organizationId, metadata } = req.body;
     
     if (!name) {
-      return res.status(400).json({ error: 'API key name is required' });
+      res.status(400).json({ error: 'API key name is required' });
+      return;
     }
 
     const result = await apiKeyManager.generateApiKey({
@@ -260,12 +261,13 @@ app.post('/api-keys', async (req, res) => {
 });
 
 // List API keys for a user
-app.get('/api-keys', async (req, res) => {
+app.get('/api-keys', async (req, res): Promise<void> => {
   try {
     const { userId } = req.query;
     
     if (!userId) {
-      return res.status(400).json({ error: 'userId query parameter is required' });
+      res.status(400).json({ error: 'userId query parameter is required' });
+      return;
     }
 
     const keys = await apiKeyManager.getUserKeys(userId as string);
@@ -289,13 +291,14 @@ app.get('/api-keys', async (req, res) => {
 });
 
 // Get API key details (for authenticated requests)
-app.get('/api-keys/:keyId', async (req, res) => {
+app.get('/api-keys/:keyId', async (req, res): Promise<void> => {
   try {
     const { keyId } = req.params;
     const metadata = await apiKeyManager['getKeyMetadata'](keyId);
     
     if (!metadata) {
-      return res.status(404).json({ error: 'API key not found' });
+      res.status(404).json({ error: 'API key not found' });
+      return;
     }
 
     // Remove sensitive data
@@ -317,13 +320,14 @@ app.get('/api-keys/:keyId', async (req, res) => {
 });
 
 // Revoke API key
-app.delete('/api-keys/:keyId', async (req, res) => {
+app.delete('/api-keys/:keyId', async (req, res): Promise<void> => {
   try {
     const { keyId } = req.params;
     const success = await apiKeyManager.revokeApiKey(keyId);
     
     if (!success) {
-      return res.status(404).json({ error: 'API key not found or already revoked' });
+      res.status(404).json({ error: 'API key not found or already revoked' });
+      return;
     }
 
     res.json({ message: 'API key revoked successfully' });
