@@ -150,7 +150,7 @@ export class SimpleStats {
     this.stats.requestsByEndpoint.increment(endpoint);
     
     // Track by IP
-    const ip = req.ip || req.connection.remoteAddress || 'unknown';
+    const ip = req.ip || (req.connection && req.connection.remoteAddress) || 'unknown';
     this.stats.requestsByIP.increment(ip);
     
     // Invalidate cache when new data comes in
@@ -166,7 +166,9 @@ export class SimpleStats {
     }
 
     const uptime = now - this.stats.startTime;
-    const requestsPerMinute = Math.round((this.stats.totalRequests / (uptime / 1000)) * 60);
+    const requestsPerMinute = uptime > 100 // Minimum 100ms for meaningful rate calculation
+      ? Math.round((this.stats.totalRequests / (uptime / 1000)) * 60)
+      : this.stats.totalRequests > 0 ? this.stats.totalRequests * 600 : 0; // Estimate: assume 100ms for rate calc
     
     // Calculate average response time from circular buffer
     const responseTimes = this.stats.responseTimes.toArray();
