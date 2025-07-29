@@ -9,6 +9,7 @@ import { RedisClient } from './utils/redis';
 import { SimpleStats } from './utils/stats';
 import { performanceMonitor, startPerformanceCleanup } from './utils/performance';
 import { initializeApiKeyManager, ApiKeyManager } from './utils/apiKeys';
+import { validateSecurityOnStartup } from './utils/secretManager';
 import { createApiKeyMiddleware, requireApiKey } from './middleware/apiKeyAuth';
 import { createJWTAuthMiddleware, requireRole, requirePermission, requireJWT } from './middleware/jwtAuth';
 import { createRateLimitMiddleware, createResetEndpoint } from './middleware';
@@ -19,6 +20,9 @@ import { ApiRateLimiterConfig, RateLimitRule } from './types';
 
 // Load environment variables
 config();
+
+// Enhanced security validation
+validateSecurityOnStartup();
 
 // Environment validation and setup
 function validateEnvironment() {
