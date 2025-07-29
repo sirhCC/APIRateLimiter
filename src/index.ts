@@ -10,6 +10,7 @@ import { SimpleStats } from './utils/stats';
 import { performanceMonitor, startPerformanceCleanup } from './utils/performance';
 import { initializeApiKeyManager, ApiKeyManager } from './utils/apiKeys';
 import { validateSecurityOnStartup } from './utils/secretManager';
+import { setupCors, getCorsInfo, createCorsConfig } from './utils/corsConfig';
 import { createApiKeyMiddleware, requireApiKey } from './middleware/apiKeyAuth';
 import { createJWTAuthMiddleware, requireRole, requirePermission, requireJWT } from './middleware/jwtAuth';
 import { createRateLimitMiddleware, createResetEndpoint, createAutoSensitiveRateLimiter, createSensitiveEndpointLogger } from './middleware';
@@ -47,6 +48,10 @@ config();
 // Enhanced security validation
 validateSecurityOnStartup();
 
+// Setup CORS configuration
+const corsOptions = setupCors();
+const corsConfig = createCorsConfig();
+
 // Environment validation and setup
 function validateEnvironment() {
   const errors: string[] = [];
@@ -61,10 +66,6 @@ function validateEnvironment() {
   if (process.env.NODE_ENV === 'production') {
     if (process.env.DEMO_USERS_ENABLED === 'true') {
       console.warn('⚠️  WARNING: Demo users are enabled in production mode');
-    }
-    
-    if (process.env.CORS_ORIGIN === '*') {
-      console.warn('⚠️  WARNING: CORS is set to allow all origins in production');
     }
     
     if (process.env.REDIS_ENABLED !== 'true') {
@@ -88,7 +89,7 @@ const app = express();
 
 // Middleware
 app.use(helmet());
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(cookieParser()); // Add cookie parser for JWT support
 app.use(performanceMonitor.middleware()); // Add performance monitoring
 app.use(morgan('combined'));
@@ -122,7 +123,7 @@ const appConfig: ApiRateLimiterConfig = {
     jwtExpiresIn: process.env.JWT_EXPIRES_IN || '24h',
     jwtAlgorithm: (process.env.JWT_ALGORITHM as any) || 'HS256',
     demoUsersEnabled: process.env.DEMO_USERS_ENABLED !== 'false',
-    corsOrigin: process.env.CORS_ORIGIN || '*',
+    corsOrigin: process.env.CORS_ORIGIN || 'development-default',
     logAuthEvents: process.env.LOG_AUTH_EVENTS === 'true',
     logRateLimitViolations: process.env.LOG_RATE_LIMIT_VIOLATIONS === 'true',
   },
@@ -343,7 +344,8 @@ app.get('/config', validateSystemEndpoint(undefined, ConfigResponseSchema), (req
         connected: redis.isHealthy(),
       },
       security: {
-        corsOrigin: appConfig.security.corsOrigin,
+        corsOrigin: corsConfig.origins.length === 1 && corsConfig.origins[0] === '*' ? '*' : `${corsConfig.origins.length} origins configured`,
+        corsInfo: getCorsInfo(corsConfig),
         demoUsersEnabled: appConfig.security.demoUsersEnabled,
       },
       rateLimit: {
