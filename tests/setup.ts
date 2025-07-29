@@ -51,13 +51,28 @@ expect.extend({
 // Global test timeout for long-running operations
 jest.setTimeout(30000);
 
-// Mock console methods to reduce noise in test output
+// Mock only specific console methods to reduce noise but keep important logs
 const originalConsoleWarn = console.warn;
 const originalConsoleError = console.error;
 
 beforeAll(() => {
-  console.warn = jest.fn();
-  console.error = jest.fn();
+  // Mock console but allow Redis-related messages through
+  console.warn = jest.fn((message: string, ...args: any[]) => {
+    if (message && typeof message === 'string' && message.includes('Redis')) {
+      // Allow Redis warnings through
+      return;
+    }
+    // Mock other warnings
+  });
+  
+  console.error = jest.fn((message: string, ...args: any[]) => {
+    if (message && typeof message === 'string' && 
+        (message.includes('Redis') || message.includes('connection'))) {
+      // Allow Redis errors through silently for tests
+      return;
+    }
+    // Mock other errors
+  });
 });
 
 afterAll(() => {
@@ -68,4 +83,15 @@ afterAll(() => {
 // Global test cleanup
 afterEach(() => {
   jest.clearAllMocks();
+});
+
+// Force cleanup at the end of all tests
+afterAll(async () => {
+  // Give some time for async operations to complete
+  await new Promise(resolve => setTimeout(resolve, 100));
+  
+  // Force garbage collection if available
+  if (global.gc) {
+    global.gc();
+  }
 });
