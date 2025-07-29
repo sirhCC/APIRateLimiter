@@ -93,6 +93,15 @@ export class ApiKeyManager {
   }): Promise<{ apiKey: string; metadata: ApiKeyMetadata }> {
     const { name, tier, userId, organizationId, metadata = {} } = options;
 
+    // Input validation
+    if (!name || name.trim().length === 0) {
+      throw new Error('Name is required and cannot be empty');
+    }
+    
+    if (userId !== undefined && (!userId || userId.trim().length === 0)) {
+      throw new Error('User ID cannot be empty if provided');
+    }
+
     // Validate tier
     if (!this.defaultTiers[tier]) {
       throw new Error(`Invalid tier: ${tier}`);
