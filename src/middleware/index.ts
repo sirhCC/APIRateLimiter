@@ -152,3 +152,15 @@ export {
   createAutoSensitiveRateLimiter,
   createSensitiveEndpointLogger,
 } from './sensitiveEndpointLimiter';
+
+// Export validation middleware
+export {
+  validateRequest,
+  validateResponse,
+  validateData,
+  createValidationMiddleware,
+  validateJwtEndpoint,
+  validateApiKeyEndpoint,
+  validateRuleEndpoint,
+  validateSystemEndpoint,
+} from './validation';
