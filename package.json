@@ -12,7 +12,11 @@
     "test": "node tests/test-setup.js",
     "test:setup": "echo \"Make sure Redis is running, then run 'npm run dev' in another terminal and 'npm test'\"",
     "setup:production": "node scripts/production-setup.js",
-    "setup": "node scripts/production-setup.js"
+    "setup": "node scripts/production-setup.js",
+    "security:audit": "node scripts/security-cli.js audit",
+    "security:fix": "node scripts/security-cli.js fix", 
+    "security:generate": "node scripts/security-cli.js generate",
+    "security:validate": "node scripts/security-cli.js validate"
   },
   "keywords": [
     "rate-limiting",
