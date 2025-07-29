@@ -8,6 +8,7 @@ interface RateLimitEntry {
 
 class SimpleInMemoryRateLimit {
   private store = new Map<string, RateLimitEntry>();
+  private keyValueStore = new Map<string, string>(); // For general key-value storage like API keys
   
   // Clean up expired entries
   private cleanup() {
@@ -98,6 +99,25 @@ class SimpleInMemoryRateLimit {
         resetTime: entry.resetTime
       };
     }
+  }
+
+  // Key-value operations for general storage (like API keys)
+  get(key: string): string | null {
+    return this.keyValueStore.get(key) || null;
+  }
+
+  set(key: string, value: string): void {
+    this.keyValueStore.set(key, value);
+  }
+
+  del(key: string): boolean {
+    return this.keyValueStore.delete(key);
+  }
+
+  // Clear expired entries and optionally clear all data
+  clear(): void {
+    this.store.clear();
+    this.keyValueStore.clear();
   }
 }
 
