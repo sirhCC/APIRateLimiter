@@ -16,7 +16,30 @@ import { createRateLimitMiddleware, createResetEndpoint, createAutoSensitiveRate
 import { createIPFilterMiddleware } from './middleware/ipFilter';
 import { createRateLimitLogger } from './middleware/logger';
 import { createOptimizedRateLimiter, RateLimitPresets } from './middleware/optimizedRateLimiter';
+import { validateJwtEndpoint, validateApiKeyEndpoint, validateRuleEndpoint, validateSystemEndpoint } from './middleware/validation';
 import { ApiRateLimiterConfig, RateLimitRule } from './types';
+
+// Import all validation schemas
+import {
+  LoginRequestSchema,
+  LoginResponseSchema,
+  VerifyTokenResponseSchema,
+  CreateApiKeyRequestSchema,
+  ApiKeyResponseSchema,
+  ListApiKeysQuerySchema,
+  ApiKeyParamsSchema,
+  ApiKeyUsageResponseSchema,
+  CreateRuleRequestSchema,
+  RuleParamsSchema,
+  RuleResponseSchema,
+  ResetParamsSchema,
+  ResetResponseSchema,
+  HealthResponseSchema,
+  StatsResponseSchema,
+  PerformanceResponseSchema,
+  ConfigResponseSchema,
+  ApiKeyTiersResponseSchema,
+} from './utils/schemas';
 
 // Load environment variables
 config();
@@ -280,12 +303,14 @@ app.use(createSensitiveEndpointLogger());
 app.use(createAutoSensitiveRateLimiter(redis));
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/health', validateSystemEndpoint(undefined, HealthResponseSchema), (req: Request, res: Response) => {
   const health = {
-    status: 'ok',
+    status: redis.isHealthy() ? 'ok' as const : 'error' as const,
     timestamp: new Date().toISOString(),
     redis: redis.isHealthy(),
     uptime: process.uptime(),
+    version: process.env.npm_package_version,
+    environment: process.env.NODE_ENV || 'development',
   };
 
   res.status(redis.isHealthy() ? 200 : 503).json(health);
@@ -302,80 +327,149 @@ app.get('/', (req, res) => {
 });
 
 // Configuration endpoints
-app.get('/config', (req, res) => {
-  res.json({
-    defaultRateLimit: appConfig.defaultRateLimit,
-    rules: appConfig.rules.map(rule => ({
-      ...rule,
-      // Don't expose sensitive config details
-    })),
-    monitoring: appConfig.monitoring,
-  });
+app.get('/config', validateSystemEndpoint(undefined, ConfigResponseSchema), (req: Request, res: Response) => {
+  const config = {
+    message: 'Configuration settings',
+    config: {
+      server: {
+        port: appConfig.server.port,
+        host: appConfig.server.host,
+        env: process.env.NODE_ENV || 'development',
+      },
+      redis: {
+        enabled: appConfig.redis.enabled,
+        host: appConfig.redis.host,
+        port: appConfig.redis.port,
+        connected: redis.isHealthy(),
+      },
+      security: {
+        corsOrigin: appConfig.security.corsOrigin,
+        demoUsersEnabled: appConfig.security.demoUsersEnabled,
+      },
+      rateLimit: {
+        defaultAlgorithm: appConfig.defaultRateLimit.algorithm,
+        activeRules: appConfig.rules.length,
+      },
+    },
+  };
+
+  res.json(config);
 });
 
 // Rate limit management endpoints
-app.post('/rules', (req, res) => {
+app.post('/rules', validateRuleEndpoint(CreateRuleRequestSchema, undefined, RuleResponseSchema), (req: Request, res: Response) => {
   try {
     const rule: RateLimitRule = req.body;
     
-    // Validate rule
-    if (!rule.id || !rule.name || !rule.pattern || !rule.config) {
-      return res.status(400).json({ error: 'Invalid rule format' });
-    }
-
     // Add or update rule
     const existingIndex = appConfig.rules.findIndex(r => r.id === rule.id);
     if (existingIndex >= 0) {
       appConfig.rules[existingIndex] = rule;
     } else {
-      appConfig.rules.push(rule);
+      const newRule = { 
+        ...rule, 
+        id: rule.id || `rule-${Date.now()}`,
+      };
+      appConfig.rules.push(newRule);
     }
 
-    return res.json({ message: 'Rule added/updated successfully', rule });
+    const savedRule = appConfig.rules.find(r => r.id === rule.id);
+    
+    return res.json({ 
+      message: 'Rule added/updated successfully', 
+      rule: {
+        id: savedRule!.id,
+        name: savedRule!.name,
+        pattern: savedRule!.pattern,
+        method: savedRule!.method,
+        config: savedRule!.config,
+        enabled: savedRule!.enabled,
+        priority: savedRule!.priority,
+        description: (savedRule as any).description,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    });
   } catch (error) {
-    return res.status(500).json({ error: 'Failed to add/update rule' });
+    return res.status(500).json({ 
+      error: 'Failed to add/update rule',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
   }
 });
 
-app.delete('/rules/:id', (req, res) => {
+app.delete('/rules/:ruleId', validateRuleEndpoint(undefined, RuleParamsSchema, RuleResponseSchema), (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
-    const index = appConfig.rules.findIndex(r => r.id === id);
+    const { ruleId } = (req as any).validatedParams || req.params;
+    const index = appConfig.rules.findIndex(r => r.id === ruleId);
     
     if (index === -1) {
-      return res.status(404).json({ error: 'Rule not found' });
+      return res.status(404).json({ 
+        error: 'Rule not found',
+        message: `Rule with ID '${ruleId}' does not exist`,
+      });
     }
 
     appConfig.rules.splice(index, 1);
-    return res.json({ message: 'Rule deleted successfully' });
+    return res.json({ 
+      message: 'Rule deleted successfully',
+      rule: undefined,
+    });
   } catch (error) {
-    return res.status(500).json({ error: 'Failed to delete rule' });
+    return res.status(500).json({ 
+      error: 'Failed to delete rule',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
   }
 });
 
 // Reset rate limits
-app.post('/reset/:key', createResetEndpoint(redis));
+app.post('/reset/:key', validateApiKeyEndpoint(undefined, undefined, ResetParamsSchema, ResetResponseSchema), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const paramsData = (req as any).validatedParams || req.params;
+    const { key } = paramsData;
+
+    // Try to delete keys for all algorithms
+    const deletePromises = [
+      redis.del(`tb:${key}`),
+      redis.del(`sw:${key}`),
+      redis.del(`fw:${key}`)
+    ];
+
+    await Promise.all(deletePromises);
+
+    res.json({ 
+      message: 'Rate limit reset successfully', 
+      key,
+      success: true,
+    });
+  } catch (error) {
+    console.error('Rate limit reset error:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+      path: req.path,
+      statusCode: 500,
+    });
+  }
+});
 
 // JWT Authentication Endpoints
 
 // Generate JWT token (demo endpoint)
-app.post('/auth/login', async (req, res): Promise<void> => {
+app.post('/auth/login', validateJwtEndpoint(LoginRequestSchema, LoginResponseSchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const { email, password, role = 'user' } = req.body;
     
-    // Demo authentication - in production, validate against your user database
-    if (!email || !password) {
-      res.status(400).json({ 
-        error: 'Email and password are required',
-      });
-      return;
-    }
-
     // Check if demo users are enabled
     if (!appConfig.security.demoUsersEnabled) {
       res.status(503).json({
         error: 'Demo authentication disabled',
-        message: 'Demo users are disabled. Please configure your own authentication system.'
+        message: 'Demo users are disabled. Please configure your own authentication system.',
+        timestamp: new Date().toISOString(),
+        path: req.path,
+        statusCode: 503,
       });
       return;
     }
@@ -392,9 +486,10 @@ app.post('/auth/login', async (req, res): Promise<void> => {
     if (!user || password !== 'demo123') {
       res.status(401).json({ 
         error: 'Invalid credentials',
-        message: appConfig.security.demoUsersEnabled 
-          ? 'Use one of the demo accounts: admin@example.com, premium@example.com, user@example.com, guest@example.com with password: demo123'
-          : 'Please provide valid credentials'
+        message: 'Use one of the demo accounts: admin@example.com, premium@example.com, user@example.com, guest@example.com with password: demo123',
+        timestamp: new Date().toISOString(),
+        path: req.path,
+        statusCode: 401,
       });
       return;
     }
@@ -427,23 +522,31 @@ app.post('/auth/login', async (req, res): Promise<void> => {
         role: user.role,
         tier: user.tier,
       },
-      expires: '24h'
+      expiresIn: '24h'
     });
 
   } catch (error: any) {
     res.status(500).json({ 
       error: 'Authentication failed',
       message: error.message,
+      timestamp: new Date().toISOString(),
+      path: req.path,
+      statusCode: 500,
     });
   }
 });
 
 // Verify JWT token
-app.get('/auth/verify', requireJWT(appConfig.security.jwtSecret), (req, res) => {
+app.get('/auth/verify', requireJWT(appConfig.security.jwtSecret), validateSystemEndpoint(undefined, VerifyTokenResponseSchema), (req: Request, res: Response) => {
   res.json({
+    valid: true,
+    user: req.user ? {
+      id: req.user.id,
+      email: req.user.email,
+      role: req.user.role,
+      tier: req.user.tier,
+    } : undefined,
     message: 'Token is valid',
-    user: req.user,
-    isAuthenticated: req.isJWTAuthenticated,
   });
 });
 
@@ -496,7 +599,7 @@ app.get('/secure/data',
 });
 
 // Stats endpoint
-app.get('/stats', async (req, res) => {
+app.get('/stats', validateSystemEndpoint(undefined, StatsResponseSchema), async (req: Request, res: Response) => {
   try {
     const simpleStats = stats.getStats();
     res.json({
@@ -505,22 +608,52 @@ app.get('/stats', async (req, res) => {
       stats: simpleStats,
     });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to get stats' });
+    res.status(500).json({ 
+      error: 'Failed to get stats',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+      path: req.path,
+      statusCode: 500,
+    });
   }
 });
 
 // Performance stats endpoint
-app.get('/performance', (req, res) => {
+app.get('/performance', validateSystemEndpoint(undefined, PerformanceResponseSchema), (req: Request, res: Response) => {
   try {
     const performanceStats = performanceMonitor.getStats();
+    const currentMetrics = performanceMonitor.getCurrentSystemMetrics();
+    
     res.json({
       message: 'Performance Statistics',
       timestamp: new Date().toISOString(),
-      performance: performanceStats,
-      system: performanceMonitor.getCurrentSystemMetrics(),
+      performance: {
+        totalRequests: performanceStats.totalRequests,
+        averageResponseTime: performanceStats.averageResponseTime,
+        p50ResponseTime: performanceStats.p50ResponseTime,
+        p95ResponseTime: performanceStats.p95ResponseTime,
+        p99ResponseTime: performanceStats.p99ResponseTime,
+        memoryUsage: {
+          rss: currentMetrics.memory.rss,
+          heapUsed: currentMetrics.memory.heapUsed,
+          heapTotal: currentMetrics.memory.heapTotal,
+          external: currentMetrics.memory.external,
+        },
+        cpuUsage: {
+          user: currentMetrics.cpu.user,
+          system: currentMetrics.cpu.system,
+        },
+        uptime: currentMetrics.uptime,
+      },
     });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to get performance stats' });
+    res.status(500).json({ 
+      error: 'Failed to get performance stats',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+      path: req.path,
+      statusCode: 500,
+    });
   }
 });
 
@@ -633,64 +766,50 @@ if (appConfig.proxy) {
 // API Key Management Endpoints
 
 // Get available tiers
-app.get('/api-keys/tiers', (req, res) => {
+app.get('/api-keys/tiers', validateSystemEndpoint(undefined, ApiKeyTiersResponseSchema), (req: Request, res: Response) => {
   res.json({
     message: 'Available API key tiers',
-    tiers: {
-      free: {
-        name: 'Free',
+    tiers: [
+      {
+        name: 'free',
+        displayName: 'Free',
+        limits: {
+          requestsPerMinute: 100,
+          requestsPerMonth: 10000,
+        },
+        features: ['Basic rate limiting', 'Standard support'],
         description: 'Basic rate limiting for free users',
-        quota: {
-          monthly: 10000,
-          daily: 1000,
-        },
-        rateLimit: {
-          windowMs: 60000, // 1 minute
-          maxRequests: 100,
-          algorithm: 'sliding-window' as const,
-        },
       },
-      premium: {
-        name: 'Premium',
-        description: 'Enhanced rate limiting with burst capacity',
-        quota: {
-          monthly: 100000,
-          daily: 10000,
-        },
-        rateLimit: {
-          windowMs: 60000, // 1 minute
-          maxRequests: 1000,
-          algorithm: 'token-bucket' as const,
+      {
+        name: 'premium',
+        displayName: 'Premium',
+        limits: {
+          requestsPerMinute: 1000,
+          requestsPerMonth: 100000,
           burstCapacity: 100,
         },
+        features: ['Enhanced rate limiting', 'Burst capacity', 'Priority support'],
+        description: 'Enhanced rate limiting with burst capacity',
       },
-      enterprise: {
-        name: 'Enterprise',
-        description: 'High-performance rate limiting for enterprise',
-        quota: {
-          monthly: 1000000,
-          daily: 100000,
-        },
-        rateLimit: {
-          windowMs: 60000, // 1 minute
-          maxRequests: 10000,
-          algorithm: 'token-bucket' as const,
+      {
+        name: 'enterprise',
+        displayName: 'Enterprise',
+        limits: {
+          requestsPerMinute: 10000,
+          requestsPerMonth: 1000000,
           burstCapacity: 500,
         },
+        features: ['High-performance rate limiting', 'Large burst capacity', 'Premium support', 'Custom configurations'],
+        description: 'High-performance rate limiting for enterprise',
       },
-    },
+    ],
   });
 });
 
 // Generate new API key
-app.post('/api-keys', async (req, res): Promise<void> => {
+app.post('/api-keys', validateApiKeyEndpoint(CreateApiKeyRequestSchema, undefined, undefined, ApiKeyResponseSchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const { name, tier = 'free', userId, organizationId, metadata } = req.body;
-    
-    if (!name) {
-      res.status(400).json({ error: 'API key name is required' });
-      return;
-    }
 
     const result = await apiKeyManager.generateApiKey({
       name,
@@ -714,21 +833,20 @@ app.post('/api-keys', async (req, res): Promise<void> => {
     res.status(500).json({ 
       error: 'Failed to generate API key',
       message: error.message,
+      timestamp: new Date().toISOString(),
+      path: req.path,
+      statusCode: 500,
     });
   }
 });
 
 // List API keys for a user
-app.get('/api-keys', async (req, res): Promise<void> => {
+app.get('/api-keys', validateApiKeyEndpoint(undefined, ListApiKeysQuerySchema, undefined, undefined), async (req: Request, res: Response): Promise<void> => {
   try {
-    const { userId } = req.query;
-    
-    if (!userId) {
-      res.status(400).json({ error: 'userId parameter is required' });
-      return;
-    }
+    const queryData = (req as any).validatedQuery || req.query;
+    const { userId } = queryData;
 
-    const keys = await apiKeyManager.getUserKeys(userId as string);
+    const keys = await apiKeyManager.getUserKeys(userId);
 
     res.json({
       message: 'API keys retrieved',
@@ -739,19 +857,28 @@ app.get('/api-keys', async (req, res): Promise<void> => {
     res.status(500).json({ 
       error: 'Failed to retrieve API keys',
       message: error.message,
+      timestamp: new Date().toISOString(),
+      path: req.path,
+      statusCode: 500,
     });
   }
 });
 
 // Get specific API key details
-app.get('/api-keys/:keyId', async (req, res): Promise<void> => {
+app.get('/api-keys/:keyId', validateApiKeyEndpoint(undefined, undefined, ApiKeyParamsSchema, undefined), async (req: Request, res: Response): Promise<void> => {
   try {
-    const { keyId } = req.params;
+    const paramsData = (req as any).validatedParams || req.params;
+    const { keyId } = paramsData;
     
     const keyMetadata = await apiKeyManager.getKeyMetadata(keyId);
     
     if (!keyMetadata) {
-      res.status(404).json({ error: 'API key not found' });
+      res.status(404).json({ 
+        error: 'API key not found',
+        timestamp: new Date().toISOString(),
+        path: req.path,
+        statusCode: 404,
+      });
       return;
     }
 
@@ -764,19 +891,28 @@ app.get('/api-keys/:keyId', async (req, res): Promise<void> => {
     res.status(500).json({ 
       error: 'Failed to retrieve API key details',
       message: error.message,
+      timestamp: new Date().toISOString(),
+      path: req.path,
+      statusCode: 500,
     });
   }
 });
 
 // Revoke API key
-app.delete('/api-keys/:keyId', async (req, res): Promise<void> => {
+app.delete('/api-keys/:keyId', validateApiKeyEndpoint(undefined, undefined, ApiKeyParamsSchema, undefined), async (req: Request, res: Response): Promise<void> => {
   try {
-    const { keyId } = req.params;
+    const paramsData = (req as any).validatedParams || req.params;
+    const { keyId } = paramsData;
     
     const success = await apiKeyManager.revokeApiKey(keyId);
     
     if (!success) {
-      res.status(404).json({ error: 'API key not found or already revoked' });
+      res.status(404).json({ 
+        error: 'API key not found or already revoked',
+        timestamp: new Date().toISOString(),
+        path: req.path,
+        statusCode: 404,
+      });
       return;
     }
 
@@ -789,25 +925,56 @@ app.delete('/api-keys/:keyId', async (req, res): Promise<void> => {
     res.status(500).json({ 
       error: 'Failed to revoke API key',
       message: error.message,
+      timestamp: new Date().toISOString(),
+      path: req.path,
+      statusCode: 500,
     });
   }
 });
 
 // Get API key usage statistics
-app.get('/api-keys/:keyId/usage', async (req, res): Promise<void> => {
+app.get('/api-keys/:keyId/usage', validateApiKeyEndpoint(undefined, undefined, ApiKeyParamsSchema, ApiKeyUsageResponseSchema), async (req: Request, res: Response): Promise<void> => {
   try {
-    const { keyId } = req.params;
+    const paramsData = (req as any).validatedParams || req.params;
+    const { keyId } = paramsData;
     
     const quotaCheck = await apiKeyManager.checkQuota(keyId);
     
+    const keyMetadata = await apiKeyManager.getKeyMetadata(keyId);
+    if (!keyMetadata) {
+      res.status(404).json({ 
+        error: 'API key not found',
+        timestamp: new Date().toISOString(),
+        path: req.path,
+        statusCode: 404,
+      });
+      return;
+    }
+
     res.json({
-      message: 'API key usage information',
-      ...quotaCheck,
+      keyId,
+      usage: {
+        currentMonth: quotaCheck.usage.currentMonthRequests,
+        totalRequests: quotaCheck.usage.totalRequests,
+        lastUsed: keyMetadata.lastUsed,
+        quotaLimit: quotaCheck.quota || 0,
+        quotaRemaining: Math.max(0, (quotaCheck.quota || 0) - quotaCheck.usage.currentMonthRequests),
+        resetDate: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString(),
+      },
+      tier: keyMetadata.tier,
+      rateLimit: {
+        windowMs: keyMetadata.rateLimit?.windowMs || 60000,
+        maxRequests: keyMetadata.rateLimit?.maxRequests || 100,
+        algorithm: keyMetadata.rateLimit?.algorithm || 'sliding-window',
+      },
     });
   } catch (error: any) {
     res.status(500).json({ 
       error: 'Failed to retrieve usage information',
       message: error.message,
+      timestamp: new Date().toISOString(),
+      path: req.path,
+      statusCode: 500,
     });
   }
 });
