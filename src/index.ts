@@ -12,7 +12,7 @@ import { initializeApiKeyManager, ApiKeyManager } from './utils/apiKeys';
 import { validateSecurityOnStartup } from './utils/secretManager';
 import { createApiKeyMiddleware, requireApiKey } from './middleware/apiKeyAuth';
 import { createJWTAuthMiddleware, requireRole, requirePermission, requireJWT } from './middleware/jwtAuth';
-import { createRateLimitMiddleware, createResetEndpoint } from './middleware';
+import { createRateLimitMiddleware, createResetEndpoint, createAutoSensitiveRateLimiter, createSensitiveEndpointLogger } from './middleware';
 import { createIPFilterMiddleware } from './middleware/ipFilter';
 import { createRateLimitLogger } from './middleware/logger';
 import { createOptimizedRateLimiter, RateLimitPresets } from './middleware/optimizedRateLimiter';
@@ -268,6 +268,16 @@ const createApiKeyAwareRateLimiter = () => {
     }
   };
 };
+
+// Apply middleware in order - THIS MUST BE BEFORE ROUTE DEFINITIONS
+app.use(ipFilter);
+app.use(jwtAuth); // Add JWT authentication
+app.use(apiKeyAuth); // Add API key authentication
+app.use(rateLimitLogger);
+
+// Add sensitive endpoint logging and rate limiting
+app.use(createSensitiveEndpointLogger());
+app.use(createAutoSensitiveRateLimiter(redis));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -584,12 +594,6 @@ app.post('/stats/reset', (req, res) => {
   stats.reset();
   res.json({ message: 'Statistics reset successfully' });
 });
-
-// Apply middleware in order
-app.use(ipFilter);
-app.use(jwtAuth); // Add JWT authentication
-app.use(apiKeyAuth); // Add API key authentication
-app.use(rateLimitLogger);
 
 // Create the final rate limiting middleware
 const finalRateLimitMiddleware = createApiKeyAwareRateLimiter();

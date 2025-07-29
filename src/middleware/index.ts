@@ -139,3 +139,16 @@ export function createResetEndpoint(redis: RedisClient) {
     }
   };
 }
+
+// Export sensitive endpoint rate limiting
+export {
+  createSensitiveEndpointLimiter,
+  createAuthRateLimiter,
+  createApiKeyRateLimiter,
+  createRuleManagementRateLimiter,
+  createResetRateLimiter,
+  createAdminRateLimiter,
+  createInfoRateLimiter,
+  createAutoSensitiveRateLimiter,
+  createSensitiveEndpointLogger,
+} from './sensitiveEndpointLimiter';

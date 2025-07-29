@@ -1,4 +1,5 @@
 import Redis from 'ioredis';
+import { inMemoryRateLimit } from './inMemoryRateLimit';
 
 /**
  * High-performance Redis client with connection pooling and Lua scripts
@@ -157,7 +158,7 @@ export class RedisClient {
           remainingTokens: result[1]
         };
       },
-      { allowed: true, remainingTokens: capacity }
+      inMemoryRateLimit.tokenBucket(key, capacity, tokens, intervalMs)
     );
   }
 
@@ -180,7 +181,7 @@ export class RedisClient {
           remainingRequests: result[1]
         };
       },
-      { allowed: true, remainingRequests: limit }
+      inMemoryRateLimit.slidingWindow(key, windowMs, limit)
     );
   }
 
@@ -202,7 +203,7 @@ export class RedisClient {
           resetTime: result[2]
         };
       },
-      { allowed: true, remainingRequests: limit, resetTime: Date.now() + windowMs }
+      inMemoryRateLimit.fixedWindow(key, limit, windowMs)
     );
   }
 
