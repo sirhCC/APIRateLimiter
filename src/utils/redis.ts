@@ -210,7 +210,7 @@ export class RedisClient {
   async get(key: string): Promise<string | null> {
     return this.executeRedisOperation(
       async () => await this.client!.get(key),
-      null
+      inMemoryRateLimit.get(key)
     );
   }
 
@@ -223,7 +223,8 @@ export class RedisClient {
           await this.client!.set(key, value);
         }
       },
-      undefined
+      // Fallback: store in memory (note: TTL not supported in fallback)
+      (() => { inMemoryRateLimit.set(key, value); })()
     );
   }
 
@@ -257,7 +258,7 @@ export class RedisClient {
         const result = await this.client!.del(key);
         return result > 0;
       },
-      false
+      inMemoryRateLimit.del(key)
     );
   }
 
@@ -286,8 +287,15 @@ export class RedisClient {
   }
 
   async disconnect(): Promise<void> {
-    if (this.client) {
-      await this.client.quit();
+    if (this.client && this.isConnected) {
+      try {
+        await this.client.quit();
+      } catch (error) {
+        // Ignore disconnect errors in test environment
+        if (process.env.NODE_ENV !== 'test') {
+          console.error('Redis disconnect error:', error);
+        }
+      }
     }
   }
 }
