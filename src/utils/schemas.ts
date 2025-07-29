@@ -258,6 +258,15 @@ export const ConfigResponseSchema = z.object({
     }),
     security: z.object({
       corsOrigin: z.string(),
+      corsInfo: z.object({
+        enabled: z.boolean(),
+        originsCount: z.number(),
+        allowsCredentials: z.boolean(),
+        allowsWildcard: z.boolean(),
+        maxAge: z.number(),
+        methods: z.array(z.string()),
+        environment: z.string(),
+      }),
       demoUsersEnabled: z.boolean(),
     }),
     rateLimit: z.object({
