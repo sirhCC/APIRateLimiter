@@ -12,6 +12,8 @@
     "test": "node tests/test-setup.js",
     "test:setup": "echo \"Make sure Redis is running, then run 'npm run dev' in another terminal and 'npm test'\"",
     "test:sensitive": "node tests/test-sensitive-rate-limiting.js",
+    "test:validation": "node tests/test-validation.js",
+    "test:all": "npm run test:sensitive && npm run test:validation",
     "setup:production": "node scripts/production-setup.js",
     "setup": "node scripts/production-setup.js",
     "security:audit": "node scripts/security-cli.js audit",
