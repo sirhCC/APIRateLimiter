@@ -31,6 +31,37 @@ A production-grade, standalone rate limiting service built with Node.js, TypeScr
 - **Docker Support**: Ready for containerized deployment
 - **Zero-Config Operation**: Works out-of-the-box with Redis disabled
 
+## 📁 Project Structure
+
+```
+api-rate-limiter/
+├── 📁 src/                    # Source code
+│   ├── 📁 middleware/         # Rate limiting middleware
+│   ├── 📁 utils/             # Utility functions (Redis, stats, etc.)
+│   └── 📁 types/             # TypeScript type definitions
+├── 📁 docs/                   # Documentation
+│   ├── IMPROVEMENT_ROADMAP.md # Development roadmap
+│   ├── PROJECT_STATUS.md      # Current project status
+│   └── README.md             # Documentation index
+├── 📁 tests/                  # Test files
+│   ├── test-api-keys.js      # API key testing
+│   ├── test-jwt-*.js         # JWT authentication tests
+│   └── README.md             # Testing documentation
+├── 📁 scripts/               # Utility scripts
+│   ├── production-setup.js   # Production setup automation
+│   └── README.md             # Scripts documentation
+├── 📁 public/                # Static files
+│   ├── dashboard.html        # Web dashboard
+│   └── README.md             # Public assets documentation
+├── 📁 config/                # Configuration files
+│   ├── .env.example         # Environment template
+│   └── README.md            # Configuration guide
+├── 📄 package.json           # Dependencies and scripts
+├── 📄 tsconfig.json          # TypeScript configuration
+├── 📄 docker-compose.yml     # Docker setup
+└── 📄 README.md             # This file
+```
+
 ## 🎯 Quick Start
 
 ### Automated Setup (Recommended)
