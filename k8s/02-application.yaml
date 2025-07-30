@@ -1,0 +1,289 @@
+# =============================================================================
+# API Rate Limiter Application Deployment
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-rate-limiter-deployment
+  namespace: api-rate-limiter
+  labels:
+    app: api-rate-limiter
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: api-rate-limiter
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: api-rate-limiter
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Security Context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        
+      containers:
+      - name: api-rate-limiter
+        image: api-rate-limiter:latest  # Replace with your registry
+        imagePullPolicy: Always
+        
+        ports:
+        - containerPort: 3000
+          name: http
+          protocol: TCP
+        - containerPort: 9090
+          name: metrics
+          protocol: TCP
+          
+        env:
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: api-rate-limiter-secrets
+              key: jwt-secret
+        - name: API_ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-rate-limiter-secrets
+              key: api-encryption-key
+        - name: RATE_LIMIT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: api-rate-limiter-secrets
+              key: rate-limit-secret
+              
+        envFrom:
+        - configMapRef:
+            name: api-rate-limiter-config
+            
+        # Resource limits and requests
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+            
+        # Security hardening
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - NET_BIND_SERVICE
+            
+        # Volume mounts for writable directories
+        volumeMounts:
+        - name: tmp-volume
+          mountPath: /tmp
+        - name: logs-volume
+          mountPath: /app/logs
+          
+        # Probes for health checking
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+          
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 1
+          failureThreshold: 3
+          
+        # Startup probe for slow-starting containers
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 1
+          failureThreshold: 12  # 60 seconds max startup time
+          
+      # Volumes for writable filesystems
+      volumes:
+      - name: tmp-volume
+        emptyDir:
+          sizeLimit: 50Mi
+      - name: logs-volume
+        emptyDir:
+          sizeLimit: 100Mi
+          
+      # Node scheduling preferences
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - api-rate-limiter
+              topologyKey: kubernetes.io/hostname
+              
+      # Graceful shutdown
+      terminationGracePeriodSeconds: 30
+      
+      # DNS configuration for faster lookups
+      dnsPolicy: ClusterFirst
+      dnsConfig:
+        options:
+        - name: ndots
+          value: "2"
+        - name: edns0
+
+---
+# =============================================================================
+# Service for API Rate Limiter
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-rate-limiter-service
+  namespace: api-rate-limiter
+  labels:
+    app: api-rate-limiter
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 3000
+    protocol: TCP
+    name: http
+  - port: 9090
+    targetPort: 9090
+    protocol: TCP
+    name: metrics
+  selector:
+    app: api-rate-limiter
+
+---
+# =============================================================================
+# Horizontal Pod Autoscaler
+# =============================================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-rate-limiter-hpa
+  namespace: api-rate-limiter
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-rate-limiter-deployment
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
+
+---
+# =============================================================================
+# Pod Disruption Budget
+# =============================================================================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api-rate-limiter-pdb
+  namespace: api-rate-limiter
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: api-rate-limiter
+
+---
+# =============================================================================
+# NetworkPolicy for Security
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-rate-limiter-network-policy
+  namespace: api-rate-limiter
+spec:
+  podSelector:
+    matchLabels:
+      app: api-rate-limiter
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx  # Allow ingress controller
+    - podSelector:
+        matchLabels:
+          app: prometheus  # Allow monitoring
+    ports:
+    - protocol: TCP
+      port: 3000
+    - protocol: TCP
+      port: 9090
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis  # Allow Redis access
+    ports:
+    - protocol: TCP
+      port: 6379
+  - to: []  # Allow DNS and external services
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+    - protocol: TCP
+      port: 443  # HTTPS for external APIs

@@ -1,0 +1,264 @@
+# =============================================================================
+# Production Docker Compose Stack for API Rate Limiter
+# 
+# Features:
+# - High availability with multiple replicas
+# - Resource limits and reservations
+# - Security hardening
+# - Production logging
+# - Service mesh readiness
+# - Rolling updates with zero downtime
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # =============================================================================
+  # Redis Cluster for High Availability
+  # =============================================================================
+  redis-master:
+    image: redis:7-alpine
+    container_name: redis-master
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_master_data:/data
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - rate_limiter_network
+
+  redis-replica:
+    image: redis:7-alpine
+    container_name: redis-replica
+    restart: unless-stopped
+    volumes:
+      - redis_replica_data:/data
+    command: redis-server --replicaof redis-master 6379
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - rate_limiter_network
+
+  # =============================================================================
+  # API Rate Limiter Service with High Availability
+  # =============================================================================
+  api-rate-limiter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    restart: unless-stopped
+    ports:
+      - "3000-3002:3000"  # Port range for load balancing
+    environment:
+      # Redis Configuration
+      - REDIS_HOST=redis-master
+      - REDIS_PORT=6379
+      - REDIS_REPLICA_HOST=redis-replica
+      - REDIS_REPLICA_PORT=6379
+      
+      # Application Configuration
+      - NODE_ENV=production
+      - PORT=3000
+      - LOG_LEVEL=info
+      
+      # Security Configuration
+      - JWT_SECRET_FILE=/run/secrets/jwt_secret
+      - API_ENCRYPTION_KEY_FILE=/run/secrets/api_encryption_key
+      - RATE_LIMIT_SECRET_FILE=/run/secrets/rate_limit_secret
+      
+      # Performance Configuration
+      - NODE_OPTIONS=--max-old-space-size=512
+      - UV_THREADPOOL_SIZE=8
+      
+      # Monitoring Configuration
+      - ENABLE_METRICS=true
+      - METRICS_PORT=9090
+      
+    secrets:
+      - jwt_secret
+      - api_encryption_key
+      - rate_limit_secret
+      
+    deploy:
+      replicas: 3
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: start-first
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+          
+    volumes:
+      # Application logs (read-only root filesystem)
+      - app_logs:/app/logs
+      - /app/node_modules  # Anonymous volume for node_modules
+      
+    depends_on:
+      redis-master:
+        condition: service_healthy
+      redis-replica:
+        condition: service_healthy
+        
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      
+    networks:
+      - rate_limiter_network
+      
+    # Security hardening
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=50m
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    user: "1001:1001"
+
+  # =============================================================================
+  # Load Balancer (HAProxy)
+  # =============================================================================
+  load-balancer:
+    image: haproxy:2.8-alpine
+    container_name: api-rate-limiter-lb
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8404:8404"  # HAProxy stats
+    volumes:
+      - ./config/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./ssl:/etc/ssl/certs:ro
+    depends_on:
+      - api-rate-limiter
+    networks:
+      - rate_limiter_network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.2'
+
+  # =============================================================================
+  # Monitoring Stack
+  # =============================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=168h'
+      - '--web.enable-lifecycle'
+    networks:
+      - rate_limiter_network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123  # Change in production!
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - rate_limiter_network
+
+# =============================================================================
+# Docker Secrets (Production: Use external secrets)
+# =============================================================================
+secrets:
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt
+  api_encryption_key:
+    file: ./secrets/api_encryption_key.txt
+  rate_limit_secret:
+    file: ./secrets/rate_limit_secret.txt
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  rate_limiter_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# =============================================================================
+# Persistent Volumes
+# =============================================================================
+volumes:
+  redis_master_data:
+    driver: local
+  redis_replica_data:
+    driver: local
+  app_logs:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

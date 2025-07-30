@@ -1,0 +1,174 @@
+# =============================================================================
+# Kubernetes Namespace for API Rate Limiter
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: api-rate-limiter
+  labels:
+    app.kubernetes.io/name: api-rate-limiter
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/component: infrastructure
+
+---
+# =============================================================================
+# Redis ConfigMap
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: api-rate-limiter
+data:
+  redis.conf: |
+    # Redis configuration for production
+    maxmemory 256mb
+    maxmemory-policy allkeys-lru
+    save 900 1
+    save 300 10
+    save 60 10000
+    appendonly yes
+    appendfsync everysec
+    tcp-keepalive 300
+    timeout 0
+
+---
+# =============================================================================
+# Application ConfigMap
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-rate-limiter-config
+  namespace: api-rate-limiter
+data:
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  PORT: "3000"
+  ENABLE_METRICS: "true"
+  METRICS_PORT: "9090"
+
+---
+# =============================================================================
+# Secrets (Base64 encoded - Replace with proper secret management)
+# =============================================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: api-rate-limiter-secrets
+  namespace: api-rate-limiter
+type: Opaque
+data:
+  # IMPORTANT: Replace these with actual base64-encoded secrets in production
+  # echo -n "your-jwt-secret" | base64
+  jwt-secret: eW91ci1qd3Qtc2VjcmV0LWhlcmU=  # "your-jwt-secret-here"
+  api-encryption-key: eW91ci1hcGkta2V5LWhlcmU=  # "your-api-key-here"
+  rate-limit-secret: eW91ci1yYXRlLWxpbWl0LXNlY3JldA==  # "your-rate-limit-secret"
+
+---
+# =============================================================================
+# Redis Deployment
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-deployment
+  namespace: api-rate-limiter
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+          name: redis
+        volumeMounts:
+        - name: redis-config
+          mountPath: /usr/local/etc/redis/redis.conf
+          subPath: redis.conf
+        - name: redis-data
+          mountPath: /data
+        command:
+        - redis-server
+        - /usr/local/etc/redis/redis.conf
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "250m"
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 1
+          failureThreshold: 3
+      volumes:
+      - name: redis-config
+        configMap:
+          name: redis-config
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: redis-pvc
+
+---
+# =============================================================================
+# Redis Service
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: api-rate-limiter
+  labels:
+    app: redis
+spec:
+  ports:
+  - port: 6379
+    targetPort: 6379
+    name: redis
+  selector:
+    app: redis
+  type: ClusterIP
+
+---
+# =============================================================================
+# Redis Persistent Volume Claim
+# =============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  namespace: api-rate-limiter
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp2  # AWS EBS - adjust for your cloud provider
+  resources:
+    requests:
+      storage: 10Gi
