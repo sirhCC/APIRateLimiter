@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { ErrorResponseSchema } from '../utils/schemas.js';
+import { log } from '../utils/logger';
 
 /**
  * Validation Middleware for API Rate Limiter
@@ -87,7 +88,12 @@ export function validateRequest(options: ValidationOptions) {
 
       next();
     } catch (error) {
-      console.error('Validation middleware error:', error);
+      log.system('Validation middleware error', {
+        error: error instanceof Error ? error.message : String(error),
+        severity: 'medium' as const,
+        endpoint: req.path,
+        method: req.method
+      });
       const errorResponse = {
         error: 'Internal Validation Error',
         message: 'An error occurred during request validation',
@@ -117,11 +123,14 @@ export function validateResponse() {
           const result = responseSchema.safeParse(body);
           
           if (!result.success) {
-            console.error('Response validation failed:', {
-              path: req.path,
+            log.system('Response validation failed', {
+              endpoint: req.path,
               method: req.method,
-              errors: result.error.issues,
-              body: JSON.stringify(body, null, 2),
+              severity: 'medium' as const,
+              errors: result.error.issues.map((issue: any) => issue.message),
+              metadata: { 
+                validationErrors: result.error.issues
+              }
             });
 
             // In development, return validation error
@@ -156,7 +165,12 @@ export function validateResponse() {
 
         return originalJson.call(this, body);
       } catch (error) {
-        console.error('Response validation middleware error:', error);
+        log.system('Response validation middleware error', {
+          error: error instanceof Error ? error.message : String(error),
+          severity: 'medium' as const,
+          endpoint: req.path,
+          method: req.method
+        });
         
         const errorResponse = {
           error: 'Internal Server Error',
