@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { RedisClient } from '../utils/redis.js';
+import { log } from '../utils/logger';
 
 export interface OptimizedRateLimitConfig {
   windowMs: number;
@@ -115,7 +116,11 @@ export class OptimizedRateLimiter {
 
         next();
       } catch (error) {
-        console.error('Rate limiter error:', error);
+        log.system('Rate limiter middleware error - failing open', {
+          error: error instanceof Error ? error.message : String(error),
+          algorithm: this.config.algorithm,
+          severity: 'medium' as const
+        });
         // Fail open - allow request if rate limiter fails
         next();
       }
@@ -141,7 +146,12 @@ export class OptimizedRateLimiter {
         resetTime,
       };
     } catch (error) {
-      console.error('Rate limit check error:', error);
+      log.system('Rate limit check error - using fallback', {
+        error: error instanceof Error ? error.message : String(error),
+        algorithm: this.config.algorithm,
+        severity: 'medium' as const,
+        fallback: true
+      });
       return {
         allowed: true,
         remaining: this.config.maxRequests,
@@ -206,7 +216,12 @@ export class OptimizedRateLimiter {
         algorithm: this.config.algorithm,
       };
     } catch (error) {
-      console.error('Rate limit stats error:', error);
+      log.system('Rate limit stats retrieval error - using fallback', {
+        error: error instanceof Error ? error.message : String(error),
+        algorithm: this.config.algorithm,
+        severity: 'low' as const,
+        fallback: true
+      });
       return {
         current: 0,
         limit: this.config.maxRequests,
