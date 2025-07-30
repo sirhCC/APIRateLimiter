@@ -6,10 +6,10 @@ module.exports = {
   // Test environment
   testEnvironment: 'node',
   
-  // Test file patterns - simplified to unit tests only by default
+  // Test file patterns - include all test types but can be filtered by CLI
   testMatch: [
-    '**/tests/unit/**/*.test.ts',
-    '**/tests/unit/**/*.test.js'
+    '**/tests/**/*.test.ts',
+    '**/tests/**/*.test.js'
   ],
   
   // Coverage configuration
