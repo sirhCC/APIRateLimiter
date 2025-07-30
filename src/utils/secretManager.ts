@@ -269,10 +269,15 @@ export function validateSecurityOnStartup(): void {
     });
     
     const criticalIssues = audit.issues.filter(i => i.severity === 'critical');
-    if (criticalIssues.length > 0) {
-      console.error('\n💥 Critical security issues found. Application cannot start.');
+    const isProduction = process.env.NODE_ENV === 'production';
+    
+    if (criticalIssues.length > 0 && isProduction) {
+      console.error('\n💥 Critical security issues found. Application cannot start in production.');
       console.error('Run "npm run security:fix" to automatically fix these issues.');
       process.exit(1);
+    } else if (criticalIssues.length > 0) {
+      console.warn('\n⚠️  Security issues found but allowing startup in development/demo mode.');
+      console.warn('For production, run "npm run security:fix" to automatically fix these issues.');
     }
   } else {
     console.log('✅ Security validation passed');

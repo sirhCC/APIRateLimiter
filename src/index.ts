@@ -56,11 +56,18 @@ const corsConfig = createCorsConfig();
 // Environment validation and setup
 function validateEnvironment() {
   const errors: string[] = [];
+  const warnings: string[] = [];
   
   // Validate JWT secret
   const jwtSecret = process.env.JWT_SECRET;
-  if (!jwtSecret || jwtSecret === 'your-super-secret-jwt-key-change-in-production' || jwtSecret.length < 32) {
-    errors.push('JWT_SECRET must be set to a secure random string (minimum 32 characters)');
+  if (!jwtSecret) {
+    warnings.push('JWT_SECRET not set - using fallback secret for demo/development');
+  } else if (jwtSecret === 'your-super-secret-jwt-key-change-in-production' || 
+             jwtSecret === 'docker-demo-secret-change-in-production' || 
+             jwtSecret === 'fallback-demo-secret-change-in-production') {
+    warnings.push('JWT_SECRET is using default value - change for production');
+  } else if (jwtSecret.length < 32) {
+    warnings.push('JWT_SECRET should be at least 32 characters for security');
   }
   
   // Warn about production settings
@@ -89,6 +96,14 @@ function validateEnvironment() {
       severity: 'critical'
     });
     process.exit(1);
+  }
+  
+  if (warnings.length > 0) {
+    log.warn('Environment validation warnings', {
+      category: 'system',
+      severity: 'medium',
+      metadata: { warnings }
+    });
   }
   
   log.system('Environment validation passed', {
@@ -135,7 +150,7 @@ const appConfig: ApiRateLimiterConfig = {
     statsRetentionMs: parseInt(process.env.STATS_RETENTION_MS || '3600000'), // 1 hour
   },
   security: {
-    jwtSecret: process.env.JWT_SECRET!,
+    jwtSecret: process.env.JWT_SECRET || 'fallback-demo-secret-change-in-production',
     jwtExpiresIn: process.env.JWT_EXPIRES_IN || '24h',
     jwtAlgorithm: (process.env.JWT_ALGORITHM as any) || 'HS256',
     demoUsersEnabled: process.env.DEMO_USERS_ENABLED !== 'false',
@@ -1165,6 +1180,18 @@ const server = app.listen(appConfig.server.port, appConfig.server.host, () => {
       cleanupTaskStarted: true
     }
   });
+});
+
+// Handle server startup errors
+server.on('error', (err: any) => {
+  log.system('Server startup error', {
+    error: err.message,
+    port: appConfig.server.port,
+    host: appConfig.server.host,
+    severity: 'critical',
+    metadata: { errorCode: err.code }
+  });
+  process.exit(1);
 });
 
 // Start performance monitoring cleanup

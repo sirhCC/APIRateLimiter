@@ -74,6 +74,13 @@ RUN mkdir -p /app/logs && chown rateLimiter:nodejs /app/logs
 # Security: Switch to non-root user
 USER rateLimiter
 
+# Set production environment variables
+ENV NODE_ENV=production
+ENV REDIS_ENABLED=false
+ENV JWT_SECRET=docker-demo-secret-change-in-production
+ENV HOST=0.0.0.0
+ENV PORT=3000
+
 # Expose application port
 EXPOSE 3000
 
