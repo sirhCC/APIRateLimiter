@@ -28,7 +28,8 @@ COPY package*.json ./
 COPY tsconfig.json ./
 
 # Install ALL dependencies (including devDependencies for building)
-RUN npm ci --include=dev
+# Use --ignore-scripts to prevent prepublish from running before we copy source
+RUN npm ci --include=dev --ignore-scripts
 
 # Copy source code
 COPY src/ ./src/
