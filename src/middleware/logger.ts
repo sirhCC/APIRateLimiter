@@ -1,4 +1,5 @@
 import { SimpleStats } from '../utils/stats';
+import { log } from '../utils/logger';
 
 export function createRateLimitLogger(stats?: SimpleStats) {
   return (req: any, res: any, next: any) => {
@@ -15,9 +16,23 @@ export function createRateLimitLogger(stats?: SimpleStats) {
       const rule = res.get('X-RateLimit-Rule');
       
       if (rateLimited) {
-        console.log(`🚫 RATE LIMITED: ${req.method} ${req.path} - IP: ${clientIP} - Rule: ${rule || 'default'} - ${responseTime}ms`);
+        log.performance('Request rate limited', {
+          method: req.method,
+          endpoint: req.path,
+          ip: clientIP,
+          responseTime,
+          remaining: remaining ? parseInt(remaining) : 0,
+          metadata: { rule: rule || 'default' }
+        });
       } else if (remaining && parseInt(remaining) < 10) {
-        console.log(`⚠️  LOW REMAINING: ${req.method} ${req.path} - IP: ${clientIP} - Remaining: ${remaining} - Rule: ${rule || 'default'} - ${responseTime}ms`);
+        log.performance('Low rate limit remaining', {
+          method: req.method,
+          endpoint: req.path,
+          ip: clientIP,
+          responseTime,
+          remaining: parseInt(remaining),
+          metadata: { rule: rule || 'default' }
+        });
       }
       
       // Track response time in stats if available
