@@ -82,7 +82,8 @@ describe('Redis Utilities', () => {
       });
 
       // Operations should not throw errors (graceful degradation)
-      const value = await invalidRedis.get('test-key');
+      // Use a unique key that shouldn't exist in any in-memory store
+      const value = await invalidRedis.get('non-existent-unique-key-12345');
       expect(value).toBeNull();
 
       await invalidRedis.disconnect();

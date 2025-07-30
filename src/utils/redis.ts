@@ -210,7 +210,7 @@ export class RedisClient {
   async get(key: string): Promise<string | null> {
     return this.executeRedisOperation(
       async () => await this.client!.get(key),
-      inMemoryRateLimit.get(key)
+      inMemoryRateLimit.get(key) // Restore fallback to in-memory store
     );
   }
 
@@ -223,15 +223,15 @@ export class RedisClient {
           await this.client!.set(key, value);
         }
       },
-      // Fallback: store in memory (note: TTL not supported in fallback)
-      (() => { inMemoryRateLimit.set(key, value); })()
+      // Fallback: store in memory with TTL support
+      (() => { inMemoryRateLimit.set(key, value, ttlSeconds); })()
     );
   }
 
   async incr(key: string): Promise<number> {
     return this.executeRedisOperation(
       async () => await this.client!.incr(key),
-      1
+      inMemoryRateLimit.incr(key)
     );
   }
 
@@ -248,7 +248,7 @@ export class RedisClient {
   async ttl(key: string): Promise<number> {
     return this.executeRedisOperation(
       async () => await this.client!.ttl(key),
-      -1
+      inMemoryRateLimit.ttl(key)
     );
   }
 

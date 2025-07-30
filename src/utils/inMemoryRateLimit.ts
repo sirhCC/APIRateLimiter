@@ -9,6 +9,7 @@ interface RateLimitEntry {
 class SimpleInMemoryRateLimit {
   private store = new Map<string, RateLimitEntry>();
   private keyValueStore = new Map<string, string>(); // For general key-value storage like API keys
+  private ttlStore = new Map<string, number>(); // Store expiration times
   
   // Clean up expired entries
   private cleanup() {
@@ -102,22 +103,73 @@ class SimpleInMemoryRateLimit {
   }
 
   // Key-value operations for general storage (like API keys)
+  set(key: string, value: string, ttlSeconds?: number): void {
+    this.keyValueStore.set(key, value);
+    if (ttlSeconds) {
+      const expirationTime = Date.now() + (ttlSeconds * 1000);
+      this.ttlStore.set(key, expirationTime);
+    } else {
+      this.ttlStore.delete(key);
+    }
+  }
+
+  // Check if key has expired and clean up if needed
+  private isExpired(key: string): boolean {
+    const expirationTime = this.ttlStore.get(key);
+    if (expirationTime && Date.now() > expirationTime) {
+      this.keyValueStore.delete(key);
+      this.ttlStore.delete(key);
+      return true;
+    }
+    return false;
+  }
+
   get(key: string): string | null {
+    if (this.isExpired(key)) {
+      return null;
+    }
     return this.keyValueStore.get(key) || null;
   }
 
-  set(key: string, value: string): void {
-    this.keyValueStore.set(key, value);
+  del(key: string): boolean {
+    this.ttlStore.delete(key);
+    return this.keyValueStore.delete(key);
   }
 
-  del(key: string): boolean {
-    return this.keyValueStore.delete(key);
+  // Increment counter operations
+  incr(key: string): number {
+    if (this.isExpired(key)) {
+      // Key expired, start fresh
+      this.keyValueStore.set(key, '1');
+      return 1;
+    }
+    
+    const current = parseInt(this.keyValueStore.get(key) || '0');
+    const newValue = current + 1;
+    this.keyValueStore.set(key, newValue.toString());
+    return newValue;
+  }
+
+  // TTL operations
+  ttl(key: string): number {
+    if (this.isExpired(key)) {
+      return -2; // Key doesn't exist
+    }
+    
+    const expirationTime = this.ttlStore.get(key);
+    if (!expirationTime) {
+      return this.keyValueStore.has(key) ? -1 : -2; // -1 = no expiry, -2 = doesn't exist
+    }
+    
+    const remainingMs = expirationTime - Date.now();
+    return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : -2;
   }
 
   // Clear expired entries and optionally clear all data
   clear(): void {
     this.store.clear();
     this.keyValueStore.clear();
+    this.ttlStore.clear();
   }
 }
 
