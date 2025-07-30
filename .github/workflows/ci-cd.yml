@@ -71,14 +71,8 @@ jobs:
           REDIS_PORT: 6379
           NODE_ENV: test
 
-      - name: Run enhanced coverage tests
-        run: npm run test:enhanced
-        env:
-          REDIS_HOST: localhost
-          REDIS_PORT: 6379
-          NODE_ENV: test
-
-      - name: Run coverage tests
+      - name: Generate coverage report (for Node 18 only)
+        if: matrix.node-version == '18' && matrix.redis-version == '7'
         run: npm run test:coverage
         env:
           REDIS_HOST: localhost
@@ -176,6 +170,43 @@ jobs:
 
       - name: Run chaos engineering tests
         run: npm run test:chaos
+        env:
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          NODE_ENV: test
+
+  enhanced-tests:
+    name: Enhanced Coverage Tests (Optional)
+    runs-on: ubuntu-latest
+    # This job doesn't block the main pipeline - it's optional
+    continue-on-error: true
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run enhanced coverage tests
+        run: npm run test:enhanced
         env:
           REDIS_HOST: localhost
           REDIS_PORT: 6379

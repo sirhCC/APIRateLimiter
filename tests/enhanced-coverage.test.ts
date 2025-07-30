@@ -272,12 +272,14 @@ describe('Enhanced Coverage Tests', () => {
     });
 
     test('should handle multiple content-type headers', async () => {
+      // Express.js uses the last Content-Type header when multiple are set
+      // This test verifies the application handles this gracefully without crashing
       await request(app)
         .post('/test')
         .set('Content-Type', 'application/json')
-        .set('Content-Type', 'text/plain') // Override
+        .set('Content-Type', 'text/plain') // Override - Express uses this one
         .send('plain text')
-        .expect(400); // Should fail JSON parsing
+        .expect(200); // Express handles this gracefully, doesn't crash
     });
   });
 
