@@ -1,4 +1,5 @@
 import { RedisClient } from '../utils/redis';
+import { log } from './logger';
 
 /**
  * In-memory rate limiter fallback when Redis is unavailable
@@ -157,7 +158,10 @@ let inMemoryLimiter: InMemoryRateLimiter | null = null;
 function getInMemoryLimiter(): InMemoryRateLimiter {
   if (!inMemoryLimiter) {
     inMemoryLimiter = new InMemoryRateLimiter();
-    console.log('🧠 In-memory rate limiter initialized for Redis fallback');
+    log.redis('In-memory rate limiter initialized for Redis fallback', {
+      algorithm: 'in-memory-fallback',
+      redisEnabled: false
+    });
   }
   return inMemoryLimiter;
 }
@@ -186,7 +190,11 @@ export class EnhancedRedisClient {
         return await this.redis.tokenBucket(key, capacity, tokensPerInterval, intervalMs);
       }
     } catch (error) {
-      console.warn('Redis token bucket failed, using in-memory fallback:', error instanceof Error ? error.message : String(error));
+      log.redis('Redis token bucket failed, using in-memory fallback', {
+        error: error instanceof Error ? error.message : String(error),
+        algorithm: 'token-bucket',
+        fallback: true
+      });
     }
 
     // Fall back to in-memory
@@ -204,7 +212,11 @@ export class EnhancedRedisClient {
         return await this.redis.slidingWindow(key, windowMs, limit);
       }
     } catch (error) {
-      console.warn('Redis sliding window failed, using in-memory fallback:', error instanceof Error ? error.message : String(error));
+      log.redis('Redis sliding window failed, using in-memory fallback', {
+        error: error instanceof Error ? error.message : String(error),
+        algorithm: 'sliding-window',
+        fallback: true
+      });
     }
 
     // Fall back to in-memory
@@ -222,7 +234,11 @@ export class EnhancedRedisClient {
         return await this.redis.fixedWindow(key, limit, windowMs);
       }
     } catch (error) {
-      console.warn('Redis fixed window failed, using in-memory fallback:', error instanceof Error ? error.message : String(error));
+      log.redis('Redis fixed window failed, using in-memory fallback', {
+        error: error instanceof Error ? error.message : String(error),
+        algorithm: 'fixed-window',
+        fallback: true
+      });
     }
 
     // Fall back to in-memory

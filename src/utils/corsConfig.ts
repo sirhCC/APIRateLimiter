@@ -1,4 +1,5 @@
 import { CorsOptions } from 'cors';
+import { log } from './logger';
 
 /**
  * CORS Configuration for API Rate Limiter
@@ -109,14 +110,23 @@ export function createCorsConfig(): CorsConfig {
     // Validate all origins
     const invalidOrigins = origins.filter(origin => !validateOrigin(origin));
     if (invalidOrigins.length > 0) {
-      console.warn(`⚠️  WARNING: Invalid CORS origins detected: ${invalidOrigins.join(', ')}`);
+      log.system('Invalid CORS origins detected', {
+        invalidOrigins: invalidOrigins.join(', '),
+        severity: 'medium',
+        category: 'cors'
+      });
       // Filter out invalid origins
       origins = origins.filter(origin => validateOrigin(origin));
     }
     
     // If all origins were invalid, fall back to defaults
     if (origins.length === 0) {
-      console.warn(`⚠️  WARNING: All CORS origins were invalid, falling back to defaults`);
+      log.system('All CORS origins were invalid, falling back to defaults', {
+        environment: env,
+        severity: 'high',
+        category: 'cors',
+        fallback: true
+      });
       origins = getDefaultOrigins(env);
     }
   } else {
@@ -125,7 +135,12 @@ export function createCorsConfig(): CorsConfig {
 
   // Warn about wildcard in production
   if (env === 'production' && origins.includes('*')) {
-    console.warn(`🚨 SECURITY WARNING: CORS wildcard (*) is enabled in production! This is a security risk.`);
+    log.security('CORS wildcard (*) enabled in production - security risk', {
+      eventType: 'security_violation',
+      severity: 'critical',
+      environment: env,
+      category: 'cors'
+    });
   }
 
   const config: CorsConfig = {
@@ -152,13 +167,19 @@ export function createCorsConfig(): CorsConfig {
     maxAge: 86400, // 24 hours
   };
 
-  console.log(`🌐 CORS configuration loaded:`);
-  console.log(`   Environment: ${env}`);
-  console.log(`   Origins: ${origins.length === 1 && origins[0] === '*' ? 'ALL (*)' : origins.length + ' configured'}`);
-  console.log(`   Credentials: ${config.credentials}`);
+  log.system('CORS configuration loaded', {
+    environment: env,
+    originsCount: origins.length === 1 && origins[0] === '*' ? 'ALL (*)' : origins.length.toString(),
+    credentials: config.credentials ? 'enabled' : 'disabled',
+    category: 'cors'
+  });
   
   if (env === 'development' || process.env.DEBUG_CORS === 'true') {
-    console.log(`   Allowed origins: ${origins.join(', ')}`);
+    log.system('CORS allowed origins', {
+      origins: origins.join(', '),
+      environment: env,
+      category: 'cors'
+    });
   }
 
   return config;
@@ -200,7 +221,12 @@ export function toCorsOptions(config: CorsConfig): CorsOptions {
 
       // Origin not allowed
       const error = new Error(`CORS policy violation: Origin '${origin}' is not allowed`);
-      console.warn(`🚫 CORS blocked: ${origin}`);
+      log.security('CORS request blocked', {
+        eventType: 'security_violation',
+        severity: 'medium',
+        origins: origin,
+        category: 'cors'
+      });
       callback(error, false);
     },
     credentials: config.credentials,
@@ -225,7 +251,12 @@ export function validateCorsConfig(config: CorsConfig): void {
     }
     
     if (config.origins.some(origin => origin.startsWith('http:'))) {
-      console.warn('⚠️  WARNING: HTTP origins detected in production environment');
+      log.security('HTTP origins detected in production environment', {
+        eventType: 'security_violation',
+        severity: 'high',
+        environment: env,
+        category: 'cors'
+      });
     }
     
     if (config.origins.length === 0) {
@@ -239,7 +270,11 @@ export function validateCorsConfig(config: CorsConfig): void {
     throw new Error(`🚨 CONFIGURATION ERROR: Invalid CORS origins: ${invalidOrigins.join(', ')}`);
   }
   
-  console.log('✅ CORS configuration validation passed');
+  log.system('CORS configuration validation passed', {
+    environment: env,
+    originsCount: config.origins.length.toString(),
+    category: 'cors'
+  });
 }
 
 /**

@@ -19,6 +19,7 @@ import { createRateLimitLogger } from './middleware/logger';
 import { createOptimizedRateLimiter, RateLimitPresets } from './middleware/optimizedRateLimiter';
 import { validateJwtEndpoint, validateApiKeyEndpoint, validateRuleEndpoint, validateSystemEndpoint } from './middleware/validation';
 import { ApiRateLimiterConfig, RateLimitRule } from './types';
+import { log, loggerMiddleware } from './utils/logger';
 
 // Import all validation schemas
 import {
@@ -65,21 +66,35 @@ function validateEnvironment() {
   // Warn about production settings
   if (process.env.NODE_ENV === 'production') {
     if (process.env.DEMO_USERS_ENABLED === 'true') {
-      console.warn('⚠️  WARNING: Demo users are enabled in production mode');
+      log.warn('Demo users are enabled in production mode', {
+        category: 'security',
+        severity: 'medium',
+        environment: 'production'
+      });
     }
     
     if (process.env.REDIS_ENABLED !== 'true') {
-      console.warn('⚠️  WARNING: Redis is disabled - limited functionality in production');
+      log.warn('Redis is disabled - limited functionality in production', {
+        category: 'system',
+        severity: 'high',
+        environment: 'production'
+      });
     }
   }
   
   if (errors.length > 0) {
-    console.error('❌ Environment validation failed:');
-    errors.forEach(error => console.error(`   - ${error}`));
+    log.error('Environment validation failed', null, {
+      category: 'system',
+      errors,
+      severity: 'critical'
+    });
     process.exit(1);
   }
   
-  console.log('✅ Environment validation passed');
+  log.system('Environment validation passed', {
+    environment: process.env.NODE_ENV || 'development',
+    redisEnabled: process.env.REDIS_ENABLED === 'true'
+  });
 }
 
 // Validate environment before starting
@@ -88,6 +103,7 @@ validateEnvironment();
 const app = express();
 
 // Middleware
+app.use(loggerMiddleware); // Add request ID and logger to requests
 app.use(helmet());
 app.use(cors(corsOptions));
 app.use(cookieParser()); // Add cookie parser for JWT support
@@ -134,9 +150,15 @@ const redis = new RedisClient(appConfig.redis);
 
 // Log Redis status
 if (appConfig.redis.enabled) {
-  console.log(`📡 Redis connection enabled: ${appConfig.redis.host}:${appConfig.redis.port}`);
+  log.redis('Redis connection enabled', {
+    host: appConfig.redis.host,
+    port: appConfig.redis.port,
+    operation: 'connect'
+  });
 } else {
-  console.log('⚠️  Redis connection disabled - using in-memory fallback');
+  log.redis('Redis connection disabled - using in-memory fallback', {
+    fallback: true
+  });
 }
 
 const stats = new SimpleStats();
@@ -163,7 +185,13 @@ const apiKeyAuth = createApiKeyMiddleware({
   checkQuota: true,
   onKeyValidated: (req, keyMetadata) => {
     if (appConfig.security.logAuthEvents) {
-      console.log(`✅ API key validated: ${keyMetadata.name} (${keyMetadata.tier})`);
+      log.apiKeyEvent('API key validated', {
+        ...log.getRequestContext(req),
+        action: 'validated',
+        keyId: keyMetadata.id,
+        tier: keyMetadata.tier,
+        metadata: { keyName: keyMetadata.name }
+      });
     }
   },
 });
@@ -198,7 +226,15 @@ const jwtAuth = createJWTAuthMiddleware({
     },
   },
   onTokenValidated: (req, user) => {
-    console.log(`✅ JWT validated: ${user.email || user.id} (${user.role || 'no-role'})`);
+    log.security('JWT token validated', {
+      ...log.getRequestContext(req),
+      eventType: 'auth_success',
+      severity: 'low',
+      details: {
+        userEmail: user.email || user.id,
+        userRole: user.role || 'no-role'
+      }
+    });
   },
 });
 
@@ -224,7 +260,19 @@ const rateLimitMiddleware = createRateLimitMiddleware({
   onLimitReached: (req, res, rule) => {
     stats.recordRequest(req, true);
     const identifier = req.apiKey ? `API key ${req.apiKey.name}` : `IP ${req.ip}`;
-    console.log(`🚫 Rate limit exceeded for ${identifier} - ${req.method} ${req.path} (rule: "${rule.name}")`);
+    
+    log.rateLimitEvent('Rate limit exceeded', {
+      ...log.getRequestContext(req),
+      allowed: false,
+      algorithm: rule.config.algorithm,
+      remaining: 0,
+      limit: rule.config.max,
+      metadata: {
+        ruleName: rule.name,
+        identifier,
+        rateLimitType: req.apiKey ? 'api_key' : 'ip_based'
+      }
+    });
   },
 });
 
@@ -258,7 +306,13 @@ const createApiKeyAwareRateLimiter = () => {
           next(err);
         });
       } catch (error) {
-        console.error('API key rate limiting error:', error);
+        log.security('API key rate limiting error', {
+          eventType: 'rate_limit_exceeded',
+          severity: 'high',
+          error: error instanceof Error ? error.message : String(error),
+          apiKey: req.headers['x-api-key'] as string,
+          endpoint: req.originalUrl
+        });
         next();
       }
     }
@@ -283,7 +337,13 @@ const createApiKeyAwareRateLimiter = () => {
           next(err);
         });
       } catch (error) {
-        console.error('JWT rate limiting error:', error);
+        log.security('JWT rate limiting error', {
+          eventType: 'rate_limit_exceeded',
+          severity: 'high',
+          error: error instanceof Error ? error.message : String(error),
+          userId: req.user?.id,
+          endpoint: req.originalUrl
+        });
         next();
       }
     } else {
@@ -446,7 +506,11 @@ app.post('/reset/:key', validateApiKeyEndpoint(undefined, undefined, ResetParams
       success: true,
     });
   } catch (error) {
-    console.error('Rate limit reset error:', error);
+    log.system('Rate limit reset error', {
+      error: error instanceof Error ? error.message : String(error),
+      endpoint: req.path,
+      method: req.method
+    });
     res.status(500).json({ 
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error',
@@ -744,7 +808,11 @@ app.use((req, res, next) => {
   // Apply API key-aware rate limiting
   finalRateLimitMiddleware(req, res, (err) => {
     if (err) {
-      console.error('Rate limiting error:', err);
+      log.system('Rate limiting error', {
+        error: err instanceof Error ? err.message : String(err),
+        endpoint: req.originalUrl,
+        method: req.method
+      });
     }
     next(err);
   });
@@ -984,7 +1052,12 @@ app.get('/api-keys/:keyId/usage', validateApiKeyEndpoint(undefined, undefined, A
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Unhandled error:', err);
+  log.system('Unhandled error', {
+    error: err instanceof Error ? err.message : String(err),
+    endpoint: req.originalUrl,
+    method: req.method,
+    severity: 'critical'
+  });
   res.status(500).json({
     error: 'Internal server error',
     message: process.env.NODE_ENV === 'development' ? err.message : undefined,
@@ -993,12 +1066,20 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 // Start server
 const server = app.listen(appConfig.server.port, appConfig.server.host, () => {
-  console.log(`🚀 API Rate Limiter started on ${appConfig.server.host}:${appConfig.server.port}`);
-  console.log(`📊 Redis: ${appConfig.redis.host}:${appConfig.redis.port}`);
-  console.log(`⚡ Default algorithm: ${appConfig.defaultRateLimit.algorithm}`);
-  console.log(`📝 Active rules: ${appConfig.rules.length}`);
-  console.log(`🔧 Performance monitoring: enabled`);
-  console.log(`🧹 Starting performance cleanup task...`);
+  log.system('API Rate Limiter started', {
+    host: appConfig.server.host,
+    port: appConfig.server.port,
+    redisHost: appConfig.redis.host,
+    redisPort: appConfig.redis.port,
+    redisEnabled: appConfig.redis.enabled,
+    defaultAlgorithm: appConfig.defaultRateLimit.algorithm,
+    activeRules: appConfig.rules.length,
+    environment: process.env.NODE_ENV || 'development',
+    metadata: {
+      performanceMonitoring: true,
+      cleanupTaskStarted: true
+    }
+  });
 });
 
 // Start performance monitoring cleanup
@@ -1006,7 +1087,9 @@ startPerformanceCleanup();
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
-  console.log('Received SIGTERM, shutting down gracefully...');
+  log.system('Received SIGTERM, shutting down gracefully', {
+    signal: 'SIGTERM'
+  });
   server.close(async () => {
     await redis.disconnect();
     process.exit(0);
@@ -1014,7 +1097,9 @@ process.on('SIGTERM', async () => {
 });
 
 process.on('SIGINT', async () => {
-  console.log('Received SIGINT, shutting down gracefully...');
+  log.system('Received SIGINT, shutting down gracefully', {
+    signal: 'SIGINT'
+  });
   server.close(async () => {
     await redis.disconnect();
     process.exit(0);
@@ -1032,7 +1117,11 @@ function loadRulesFromConfig(): RateLimitRule[] {
     try {
       return JSON.parse(rulesConfig);
     } catch (error) {
-      console.error('Failed to parse RATE_LIMIT_RULES:', error);
+      log.system('Failed to parse RATE_LIMIT_RULES', {
+        error: error instanceof Error ? error.message : String(error),
+        config: rulesConfig,
+        severity: 'high'
+      });
     }
   }
 

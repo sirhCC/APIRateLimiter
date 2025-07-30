@@ -1,5 +1,6 @@
 import { RedisClient } from './redis';
 import { createHash, randomBytes } from 'crypto';
+import { log } from './logger';
 
 export interface ApiKeyTier {
   name: string;
@@ -161,7 +162,11 @@ export class ApiKeyManager {
 
       return metadata;
     } catch (error) {
-      console.error('API key validation error:', error);
+      log.security('API key validation error', {
+        eventType: 'auth_failure',
+        severity: 'high',
+        error: error instanceof Error ? error.message : String(error)
+      });
       return null;
     }
   }
@@ -187,7 +192,11 @@ export class ApiKeyManager {
 
       await this.updateKeyMetadata(metadata);
     } catch (error) {
-      console.error('Usage recording error:', error);
+      log.system('Usage recording error', {
+        error: error instanceof Error ? error.message : String(error),
+        severity: 'medium',
+        category: 'api-keys'
+      });
     }
   }
 
@@ -224,7 +233,12 @@ export class ApiKeyManager {
       
       return keys.filter(Boolean) as ApiKeyMetadata[];
     } catch (error) {
-      console.error('Error getting user keys:', error);
+      log.system('Error getting user keys', {
+        error: error instanceof Error ? error.message : String(error),
+        userId,
+        severity: 'medium',
+        category: 'api-keys'
+      });
       return [];
     }
   }
@@ -242,7 +256,12 @@ export class ApiKeyManager {
 
       return true;
     } catch (error) {
-      console.error('Error revoking API key:', error);
+      log.security('Error revoking API key', {
+        eventType: 'security_violation',
+        severity: 'high',
+        error: error instanceof Error ? error.message : String(error),
+        apiKeyId: keyId
+      });
       return false;
     }
   }
@@ -270,7 +289,12 @@ export class ApiKeyManager {
       const data = await this.redis.get(key);
       return data ? JSON.parse(data) : null;
     } catch (error) {
-      console.error('Error getting key metadata:', error);
+      log.system('Error getting key metadata', {
+        error: error instanceof Error ? error.message : String(error),
+        keyId,
+        severity: 'medium',
+        category: 'api-keys'
+      });
       return null;
     }
   }
@@ -306,7 +330,12 @@ export class ApiKeyManager {
       const data = await this.redis.get(key);
       return data ? JSON.parse(data) : null;
     } catch (error) {
-      console.error('Error getting key metadata:', error);
+      log.system('Error getting private key metadata', {
+        error: error instanceof Error ? error.message : String(error),
+        keyId,
+        severity: 'medium',
+        category: 'api-keys'
+      });
       return null;
     }
   }
@@ -327,7 +356,13 @@ export class ApiKeyManager {
         await this.redis.set(userKeysKey, JSON.stringify(keyIds));
       }
     } catch (error) {
-      console.error('Error adding key to user:', error);
+      log.system('Error adding key to user', {
+        error: error instanceof Error ? error.message : String(error),
+        userId,
+        keyId,
+        severity: 'high',
+        category: 'api-keys'
+      });
     }
   }
 }
