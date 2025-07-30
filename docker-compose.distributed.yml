@@ -1,0 +1,477 @@
+# Docker Compose for Distributed Rate Limiter Development and Testing
+# This sets up the full distributed infrastructure
+
+version: '3.8'
+
+services:
+  # Redis Cluster Nodes
+  redis-node-1:
+    image: redis:7.2-alpine
+    container_name: redis-node-1
+    command: >
+      redis-server
+      --port 7000
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfilename appendonly-7000.aof
+      --dir /data
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --protected-mode no
+    ports:
+      - "7000:7000"
+      - "17000:17000"
+    volumes:
+      - redis-node-1-data:/data
+    networks:
+      - distributed-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7000", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  redis-node-2:
+    image: redis:7.2-alpine
+    container_name: redis-node-2
+    command: >
+      redis-server
+      --port 7001
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfilename appendonly-7001.aof
+      --dir /data
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --protected-mode no
+    ports:
+      - "7001:7001"
+      - "17001:17001"
+    volumes:
+      - redis-node-2-data:/data
+    networks:
+      - distributed-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7001", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  redis-node-3:
+    image: redis:7.2-alpine
+    container_name: redis-node-3
+    command: >
+      redis-server
+      --port 7002
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfilename appendonly-7002.aof
+      --dir /data
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --protected-mode no
+    ports:
+      - "7002:7002"
+      - "17002:17002"
+    volumes:
+      - redis-node-3-data:/data
+    networks:
+      - distributed-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7002", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  redis-node-4:
+    image: redis:7.2-alpine
+    container_name: redis-node-4
+    command: >
+      redis-server
+      --port 7003
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfilename appendonly-7003.aof
+      --dir /data
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --protected-mode no
+    ports:
+      - "7003:7003"
+      - "17003:17003"
+    volumes:
+      - redis-node-4-data:/data
+    networks:
+      - distributed-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7003", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  redis-node-5:
+    image: redis:7.2-alpine
+    container_name: redis-node-5
+    command: >
+      redis-server
+      --port 7004
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfilename appendonly-7004.aof
+      --dir /data
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --protected-mode no
+    ports:
+      - "7004:7004"
+      - "17004:17004"
+    volumes:
+      - redis-node-5-data:/data
+    networks:
+      - distributed-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7004", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  redis-node-6:
+    image: redis:7.2-alpine
+    container_name: redis-node-6
+    command: >
+      redis-server
+      --port 7005
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfilename appendonly-7005.aof
+      --dir /data
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --protected-mode no
+    ports:
+      - "7005:7005"
+      - "17005:17005"
+    volumes:
+      - redis-node-6-data:/data
+    networks:
+      - distributed-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7005", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Redis Cluster Initialization
+  redis-cluster-init:
+    image: redis:7.2-alpine
+    container_name: redis-cluster-init
+    depends_on:
+      redis-node-1:
+        condition: service_healthy
+      redis-node-2:
+        condition: service_healthy
+      redis-node-3:
+        condition: service_healthy
+      redis-node-4:
+        condition: service_healthy
+      redis-node-5:
+        condition: service_healthy
+      redis-node-6:
+        condition: service_healthy
+    command: >
+      sh -c "
+        echo 'Waiting for Redis nodes to be ready...'
+        sleep 15
+        echo 'Creating Redis cluster...'
+        echo 'yes' | redis-cli --cluster create \
+          redis-node-1:7000 \
+          redis-node-2:7001 \
+          redis-node-3:7002 \
+          redis-node-4:7003 \
+          redis-node-5:7004 \
+          redis-node-6:7005 \
+          --cluster-replicas 1
+        echo 'Redis cluster created successfully!'
+        
+        # Verify cluster status
+        redis-cli -h redis-node-1 -p 7000 cluster info
+        redis-cli -h redis-node-1 -p 7000 cluster nodes
+      "
+    networks:
+      - distributed-network
+    restart: "no"
+
+  # API Rate Limiter Instance 1
+  api-instance-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: api-instance-1
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DISTRIBUTED_REDIS_MODE=cluster
+      - REDIS_CLUSTER_NODES=redis-node-1:7000,redis-node-2:7001,redis-node-3:7002,redis-node-4:7003,redis-node-5:7004,redis-node-6:7005
+      - INSTANCE_ID=api-rate-limiter-instance-1
+      - COORDINATION_PREFIX=rate_limiter:distributed
+      - COORDINATION_STRATEGY=consistent-hashing
+      - CIRCUIT_BREAKER_ENABLED=true
+      - CIRCUIT_BREAKER_FAILURE_THRESHOLD=5
+      - CIRCUIT_BREAKER_SUCCESS_THRESHOLD=3
+      - CIRCUIT_BREAKER_TIMEOUT=60000
+      - CIRCUIT_BREAKER_DEGRADED_LIMIT=100
+      - MONITORING_ENABLED=true
+      - MONITORING_ERROR_RATE_THRESHOLD=0.05
+      - MONITORING_LATENCY_THRESHOLD=1000
+      - MONITORING_MEMORY_THRESHOLD=0.8
+      - DEFAULT_RATE_LIMIT_ALGORITHM=sliding-window
+      - DEFAULT_RATE_LIMIT_LIMIT=1000
+      - DEFAULT_RATE_LIMIT_WINDOW_MS=3600000
+    ports:
+      - "3001:3000"
+    depends_on:
+      redis-cluster-init:
+        condition: service_completed_successfully
+    networks:
+      - distributed-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  # API Rate Limiter Instance 2
+  api-instance-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: api-instance-2
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DISTRIBUTED_REDIS_MODE=cluster
+      - REDIS_CLUSTER_NODES=redis-node-1:7000,redis-node-2:7001,redis-node-3:7002,redis-node-4:7003,redis-node-5:7004,redis-node-6:7005
+      - INSTANCE_ID=api-rate-limiter-instance-2
+      - COORDINATION_PREFIX=rate_limiter:distributed
+      - COORDINATION_STRATEGY=consistent-hashing
+      - CIRCUIT_BREAKER_ENABLED=true
+      - CIRCUIT_BREAKER_FAILURE_THRESHOLD=5
+      - CIRCUIT_BREAKER_SUCCESS_THRESHOLD=3
+      - CIRCUIT_BREAKER_TIMEOUT=60000
+      - CIRCUIT_BREAKER_DEGRADED_LIMIT=100
+      - MONITORING_ENABLED=true
+      - MONITORING_ERROR_RATE_THRESHOLD=0.05
+      - MONITORING_LATENCY_THRESHOLD=1000
+      - MONITORING_MEMORY_THRESHOLD=0.8
+      - DEFAULT_RATE_LIMIT_ALGORITHM=sliding-window
+      - DEFAULT_RATE_LIMIT_LIMIT=1000
+      - DEFAULT_RATE_LIMIT_WINDOW_MS=3600000
+    ports:
+      - "3002:3000"
+    depends_on:
+      redis-cluster-init:
+        condition: service_completed_successfully
+    networks:
+      - distributed-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  # API Rate Limiter Instance 3
+  api-instance-3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: api-instance-3
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DISTRIBUTED_REDIS_MODE=cluster
+      - REDIS_CLUSTER_NODES=redis-node-1:7000,redis-node-2:7001,redis-node-3:7002,redis-node-4:7003,redis-node-5:7004,redis-node-6:7005
+      - INSTANCE_ID=api-rate-limiter-instance-3
+      - COORDINATION_PREFIX=rate_limiter:distributed
+      - COORDINATION_STRATEGY=consistent-hashing
+      - CIRCUIT_BREAKER_ENABLED=true
+      - CIRCUIT_BREAKER_FAILURE_THRESHOLD=5
+      - CIRCUIT_BREAKER_SUCCESS_THRESHOLD=3
+      - CIRCUIT_BREAKER_TIMEOUT=60000
+      - CIRCUIT_BREAKER_DEGRADED_LIMIT=100
+      - MONITORING_ENABLED=true
+      - MONITORING_ERROR_RATE_THRESHOLD=0.05
+      - MONITORING_LATENCY_THRESHOLD=1000
+      - MONITORING_MEMORY_THRESHOLD=0.8
+      - DEFAULT_RATE_LIMIT_ALGORITHM=sliding-window
+      - DEFAULT_RATE_LIMIT_LIMIT=1000
+      - DEFAULT_RATE_LIMIT_WINDOW_MS=3600000
+    ports:
+      - "3003:3000"
+    depends_on:
+      redis-cluster-init:
+        condition: service_completed_successfully
+    networks:
+      - distributed-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  # HAProxy Load Balancer
+  haproxy:
+    image: haproxy:2.8-alpine
+    container_name: haproxy-lb
+    ports:
+      - "80:80"
+      - "8080:8080"  # Stats interface
+    volumes:
+      - ./config/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      api-instance-1:
+        condition: service_healthy
+      api-instance-2:
+        condition: service_healthy
+      api-instance-3:
+        condition: service_healthy
+    networks:
+      - distributed-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Prometheus for Monitoring
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    networks:
+      - distributed-network
+    restart: unless-stopped
+
+  # Grafana for Visualization
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    networks:
+      - distributed-network
+    restart: unless-stopped
+
+  # Redis Exporter for Prometheus
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.51.0
+    container_name: redis-exporter
+    environment:
+      - REDIS_ADDR=redis://redis-node-1:7000,redis://redis-node-2:7001,redis://redis-node-3:7002
+    ports:
+      - "9121:9121"
+    depends_on:
+      redis-cluster-init:
+        condition: service_completed_successfully
+    networks:
+      - distributed-network
+    restart: unless-stopped
+
+  # Load Testing Tool
+  load-tester:
+    build:
+      context: .
+      dockerfile: Dockerfile.loadtest
+    container_name: load-tester
+    environment:
+      - TARGET_URL=http://haproxy
+      - CONCURRENT_USERS=50
+      - REQUESTS_PER_SECOND=100
+      - TEST_DURATION=300s
+    depends_on:
+      haproxy:
+        condition: service_healthy
+    networks:
+      - distributed-network
+    profiles:
+      - testing
+    restart: "no"
+
+volumes:
+  redis-node-1-data:
+  redis-node-2-data:
+  redis-node-3-data:
+  redis-node-4-data:
+  redis-node-5-data:
+  redis-node-6-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  distributed-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
