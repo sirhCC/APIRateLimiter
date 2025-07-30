@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { RedisClient } from '../utils/redis';
 import { createOptimizedRateLimiter } from './optimizedRateLimiter';
+import { log } from '../utils/logger';
 
 /**
  * Sensitive Endpoint Rate Limiting Middleware
@@ -78,7 +79,17 @@ export function createSensitiveEndpointLimiter(
     keyGenerator,
     onLimitReached: (req, res) => {
       const identifier = req.apiKey?.name || req.user?.email || req.ip;
-      console.warn(`🚨 Sensitive endpoint rate limit exceeded: ${identifier} - ${req.method} ${req.path} (${config.description})`);
+      log.security('Sensitive endpoint rate limit exceeded', {
+        eventType: 'rate_limit_exceeded',
+        severity: 'high' as const,
+        endpoint: `${req.method} ${req.path}`,
+        ip: req.ip,
+        method: req.method,
+        metadata: { 
+          identifier,
+          description: config.description
+        }
+      });
       
       // Add security headers
       res.set({
@@ -230,7 +241,14 @@ export function createSensitiveEndpointLogger() {
       path === '/stats/reset';
 
     if (isSensitive) {
-      console.log(`🔐 Sensitive endpoint access: ${identifier} - ${method} ${path} - ${new Date().toISOString()}`);
+      log.security('Sensitive endpoint access', {
+        eventType: 'sensitive_endpoint_access',
+        severity: 'medium' as const,
+        endpoint: `${method} ${path}`,
+        ip: req.ip,
+        method,
+        metadata: { identifier }
+      });
       
       // Add security audit trail header
       res.set('X-Security-Audit', 'logged');
