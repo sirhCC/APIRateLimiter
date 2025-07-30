@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { ApiKeyManager, ApiKeyMetadata } from '../utils/apiKeys';
+import { log } from '../utils/logger';
 
 // Extend Express Request interface
 declare global {
@@ -112,7 +113,11 @@ export function createApiKeyMiddleware(options: ApiKeyMiddlewareOptions) {
 
       // Record usage (async, don't wait)
       apiKeyManager.recordUsage(keyMetadata.id, 1).catch(error => {
-        console.error('Error recording API key usage:', error);
+        log.system('Failed to record API key usage', {
+          error: error instanceof Error ? error.message : String(error),
+          keyId: keyMetadata.id,
+          severity: 'low' as const
+        });
       });
 
       // Call custom validation callback
@@ -122,7 +127,11 @@ export function createApiKeyMiddleware(options: ApiKeyMiddlewareOptions) {
 
       next();
     } catch (error) {
-      console.error('API key middleware error:', error);
+      log.system('API key middleware error', {
+        error: error instanceof Error ? error.message : String(error),
+        severity: 'high' as const,
+        metadata: { required }
+      });
       
       if (required) {
         res.status(500).json({
