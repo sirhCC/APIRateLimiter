@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { RedisClient } from '../utils/redis';
 import { RateLimitRule, RateLimitConfig } from '../types';
 import { createRateLimiter } from './rateLimiter';
+import { log } from '../utils/logger';
 
 export interface RateLimitMiddlewareOptions {
   redis: RedisClient;
@@ -66,7 +67,12 @@ export function createRateLimitMiddleware(options: RateLimitMiddlewareOptions) {
       // Request allowed, continue
       next();
     } catch (error) {
-      console.error('Rate limiting error:', error);
+      log.system('Rate limiting middleware error - failing open', {
+        error: error instanceof Error ? error.message : String(error),
+        severity: 'medium' as const,
+        endpoint: req.path,
+        method: req.method
+      });
       // On error, allow the request to continue (fail open)
       next();
     }
@@ -134,7 +140,12 @@ export function createResetEndpoint(redis: RedisClient) {
 
       res.json({ message: 'Rate limit reset successfully', key });
     } catch (error) {
-      console.error('Rate limit reset error:', error);
+      log.system('Rate limit reset error', {
+        error: error instanceof Error ? error.message : String(error),
+        severity: 'medium' as const,
+        endpoint: req.path,
+        method: req.method
+      });
       res.status(500).json({ error: 'Internal server error' });
     }
   };
