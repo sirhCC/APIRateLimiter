@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt, { Algorithm } from 'jsonwebtoken';
+import { log } from '../utils/logger';
 
 // Extend Express Request type to include JWT user data
 declare global {
@@ -120,11 +121,22 @@ export function createJWTAuthMiddleware(options: JWTAuthOptions) {
         onTokenValidated(req, decoded);
       }
 
-      console.log(`✅ JWT authenticated: ${decoded.email || decoded.id} (${decoded.role || 'no-role'})`);
+      log.security('JWT authentication successful', {
+        eventType: 'auth_success',
+        severity: 'low' as const,
+        userId: decoded.email || decoded.id,
+        metadata: { role: decoded.role || 'no-role' }
+      });
       next();
 
     } catch (error: any) {
-      console.log(`❌ JWT authentication failed: ${error.message}`);
+      log.security('JWT authentication failed', {
+        eventType: 'auth_failure',
+        severity: 'medium' as const,
+        error: error.message,
+        endpoint: req.path,
+        method: req.method
+      });
       
       if (required) {
         if (onTokenInvalid) {
