@@ -9,13 +9,13 @@
         .container { max-width: 1200px; margin: 0 auto; }
         .card { background: white; padding: 20px; margin: 10px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .header { text-align: center; color: #333; }
-        .status { display: inline-block; padding: 4px 8px; border-radius: 4px; color: white; }
+        .status { display: inline-block; padding: 4px 8px; border-radius: 4px; color: white; word-wrap: break-word; max-width: 100%; box-sizing: border-box; text-align: center; }
         .status.healthy { background: #4CAF50; }
         .status.unhealthy { background: #f44336; }
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
         .metric { text-align: center; }
         .metric h3 { margin: 0; color: #666; }
-        .metric .value { font-size: 2em; font-weight: bold; color: #333; }
+        .metric .value { font-size: 1.5em; font-weight: bold; color: #333; overflow: hidden; word-wrap: break-word; }
         .rules-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         .rules-table th, .rules-table td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
         .rules-table th { background-color: #f2f2f2; }
@@ -29,6 +29,17 @@
         .lookup-btn:hover { background: #1976D2; }
         .revoke-btn { background: #f44336; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; }
         .revoke-btn:hover { background: #d32f2f; }
+        .test-btn { color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin: 2px; }
+        .test-btn.verify { background: #2196F3; }
+        .test-btn.verify:hover { background: #1976D2; }
+        .test-btn.admin { background: #F44336; }
+        .test-btn.admin:hover { background: #d32f2f; }
+        .test-btn.premium { background: #FF9800; }
+        .test-btn.premium:hover { background: #F57C00; }
+        .test-btn.secure { background: #795548; }
+        .test-btn.secure:hover { background: #5D4037; }
+        .test-btn.clear { background: #607D8B; }
+        .test-btn.clear:hover { background: #455A64; }
     </style>
 </head>
 <body>
@@ -36,7 +47,7 @@
         <div class="card">
             <h1 class="header">🛡️ API Rate Limiter Dashboard</h1>
             <div style="text-align: center;">
-                <button class="refresh-btn" onclick="refreshData()">🔄 Refresh</button>
+                <button id="refreshBtn" class="refresh-btn">🔄 Refresh</button>
                 <span id="lastUpdated" style="margin-left: 20px; color: #666;"></span>
             </div>
         </div>
@@ -165,11 +176,11 @@
             <div style="margin-bottom: 20px;">
                 <h3>Test JWT Endpoints</h3>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
-                    <button onclick="verifyToken()" style="background: #2196F3; color: white; border: none; padding: 8px 16px; border-radius: 4px;">Verify Token</button>
-                    <button onclick="testAdminEndpoint()" style="background: #F44336; color: white; border: none; padding: 8px 16px; border-radius: 4px;">Test Admin</button>
-                    <button onclick="testPremiumEndpoint()" style="background: #FF9800; color: white; border: none; padding: 8px 16px; border-radius: 4px;">Test Premium</button>
-                    <button onclick="testSecureEndpoint()" style="background: #795548; color: white; border: none; padding: 8px 16px; border-radius: 4px;">Test Secure</button>
-                    <button onclick="clearToken()" style="background: #607D8B; color: white; border: none; padding: 8px 16px; border-radius: 4px;">Clear Token</button>
+                    <button id="verifyTokenBtn" class="test-btn verify">Verify Token</button>
+                    <button id="testAdminBtn" class="test-btn admin">Test Admin</button>
+                    <button id="testPremiumBtn" class="test-btn premium">Test Premium</button>
+                    <button id="testSecureBtn" class="test-btn secure">Test Secure</button>
+                    <button id="clearTokenBtn" class="test-btn clear">Clear Token</button>
                 </div>
                 <div id="jwtTestResult" style="margin-top: 10px;"></div>
             </div>
@@ -338,11 +349,11 @@
                         `;
                     }
                 } else {
-                    resultDiv.innerHTML = `<p style="color: #f44336;">Error: ${result.message}</p>`;
+                    resultDiv.innerHTML = `<p class="error-text">Error: ${result.message}</p>`;
                 }
             } catch (error) {
                 console.error('Error looking up user keys:', error);
-                resultDiv.innerHTML = '<p style="color: #f44336;">Error looking up keys. Please try again.</p>';
+                resultDiv.innerHTML = '<p class="error-text">Error looking up keys. Please try again.</p>';
             }
         }
 
@@ -425,63 +436,6 @@
             }
         });
         
-        async function lookupUserKeys() {
-            const userId = document.getElementById('lookupUserId').value;
-            if (!userId) {
-                alert('Please enter a User ID');
-                return;
-            }
-            
-            try {
-                const response = await fetch(`/api-keys?userId=${encodeURIComponent(userId)}`);
-                const result = await response.json();
-                
-                const resultDiv = document.getElementById('userKeysResult');
-                
-                if (response.ok) {
-                    if (result.keys.length === 0) {
-                        resultDiv.innerHTML = '<p>No API keys found for this user.</p>';
-                    } else {
-                        resultDiv.innerHTML = `
-                            <table class="rules-table">
-                                <thead>
-                                    <tr>
-                                        <th>Name</th>
-                                        <th>Tier</th>
-                                        <th>Created</th>
-                                        <th>Last Used</th>
-                                        <th>Status</th>
-                                        <th>Usage</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${result.keys.map(key => `
-                                        <tr>
-                                            <td>${key.name}</td>
-                                            <td>${key.tier}</td>
-                                            <td>${new Date(key.created).toLocaleDateString()}</td>
-                                            <td>${key.lastUsed ? new Date(key.lastUsed).toLocaleDateString() : 'Never'}</td>
-                                            <td class="${key.isActive ? 'enabled' : 'disabled'}">${key.isActive ? 'Active' : 'Revoked'}</td>
-                                            <td>${key.usage.currentMonthRequests} / ${key.usage.totalRequests} total</td>
-                                            <td>
-                                                ${key.isActive ? `<button onclick="revokeKey('${key.id}')" style="background: #f44336; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer;">Revoke</button>` : ''}
-                                            </td>
-                                        </tr>
-                                    `).join('')}
-                                </tbody>
-                            </table>
-                        `;
-                    }
-                } else {
-                    resultDiv.innerHTML = `<p style="color: #f44336;">Error: ${result.message}</p>`;
-                }
-            } catch (error) {
-                console.error('Error looking up user keys:', error);
-                document.getElementById('userKeysResult').innerHTML = '<p style="color: #f44336;">Error looking up keys. Please try again.</p>';
-            }
-        }
-        
         async function revokeKey(keyId) {
             if (!confirm('Are you sure you want to revoke this API key? This action cannot be undone.')) {
                 return;
@@ -560,13 +514,13 @@
                 
                 const result = await response.json();
                 if (response.ok) {
-                    resultDiv.innerHTML = `<span style="color: #4CAF50;">✅ Token is valid! User: ${result.user.email} (${result.user.role})</span>`;
+                    resultDiv.innerHTML = `<span class="success-text">✅ Token is valid! User: ${result.user.email} (${result.user.role})</span>`;
                 } else {
-                    resultDiv.innerHTML = `<span style="color: #f44336;">❌ Invalid token: ${result.message}</span>`;
+                    resultDiv.innerHTML = `<span class="error-text">❌ Invalid token: ${result.message}</span>`;
                 }
             } catch (error) {
                 console.error('Error verifying token:', error);
-                resultDiv.innerHTML = '<span style="color: #f44336;">❌ Error verifying token. Please try again.</span>';
+                resultDiv.innerHTML = '<span class="error-text">❌ Error verifying token. Please try again.</span>';
             }
         }
 
@@ -601,13 +555,13 @@
                 
                 const result = await response.json();
                 if (response.ok) {
-                    resultDiv.innerHTML = `<span style="color: #4CAF50;">✅ ${name} endpoint test successful! ${JSON.stringify(result.data || result.message)}</span>`;
+                    resultDiv.innerHTML = `<span class="success-text">✅ ${name} endpoint test successful! ${JSON.stringify(result.data || result.message)}</span>`;
                 } else {
-                    resultDiv.innerHTML = `<span style="color: #f44336;">❌ ${name} endpoint test failed: ${result.message}</span>`;
+                    resultDiv.innerHTML = `<span class="error-text">❌ ${name} endpoint test failed: ${result.message}</span>`;
                 }
             } catch (error) {
                 console.error(`Error testing ${name} endpoint:`, error);
-                resultDiv.innerHTML = `<span style="color: #f44336;">❌ Error testing ${name} endpoint. Please try again.</span>`;
+                resultDiv.innerHTML = `<span class="error-text">❌ Error testing ${name} endpoint. Please try again.</span>`;
             }
         }
 
@@ -671,11 +625,11 @@
                         </div>
                     `;
                 } else {
-                    document.getElementById('defaultConfig').innerHTML = '<p style="color: #f44336;">Error loading configuration</p>';
+                    document.getElementById('defaultConfig').innerHTML = '<p class="error-text">Error loading configuration</p>';
                 }
             } catch (error) {
                 console.error('Error loading config:', error);
-                document.getElementById('defaultConfig').innerHTML = '<p style="color: #f44336;">Error loading configuration</p>';
+                document.getElementById('defaultConfig').innerHTML = '<p class="error-text">Error loading configuration</p>';
             }
         }
 
@@ -743,11 +697,11 @@
                         </tr>
                     `;
                 } else {
-                    rulesTable.innerHTML = '<tr><td colspan="7" style="color: #f44336;">Error loading rules</td></tr>';
+                    rulesTable.innerHTML = '<tr><td colspan="7" class="error-text">Error loading rules</td></tr>';
                 }
             } catch (error) {
                 console.error('Error loading rules:', error);
-                rulesTable.innerHTML = '<tr><td colspan="7" style="color: #f44336;">Error loading rules</td></tr>';
+                rulesTable.innerHTML = '<tr><td colspan="7" class="error-text">Error loading rules</td></tr>';
             }
         }
 
@@ -764,6 +718,22 @@
             
             // Add event listener for lookup button
             document.getElementById('lookupKeysBtn').addEventListener('click', lookupUserKeys);
+            
+            // Add event listeners for all buttons
+            document.getElementById('refreshBtn').addEventListener('click', refreshData);
+            document.getElementById('verifyTokenBtn').addEventListener('click', verifyToken);
+            document.getElementById('testAdminBtn').addEventListener('click', testAdminEndpoint);
+            document.getElementById('testPremiumBtn').addEventListener('click', testPremiumEndpoint);
+            document.getElementById('testSecureBtn').addEventListener('click', testSecureEndpoint);
+            document.getElementById('clearTokenBtn').addEventListener('click', clearToken);
+            
+            // Add event delegation for revoke buttons (dynamically created)
+            document.getElementById('userKeysResult').addEventListener('click', function(e) {
+                if (e.target.classList.contains('revoke-btn')) {
+                    const keyId = e.target.getAttribute('data-key-id');
+                    revokeKey(keyId);
+                }
+            });
             
             // The loadTiers function already executes automatically (IIFE)
             
