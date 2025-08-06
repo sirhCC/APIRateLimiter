@@ -109,3 +109,18 @@ jspm_packages/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Cleanup and temporary files
+*.tmp
+*.temp
+*~
+.backup/
+*.backup
+README-*.md
+README_*.md
+
+# Docker build cache
+.docker/
+
+# Test artifacts
+test-startup.*

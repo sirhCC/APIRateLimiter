@@ -280,8 +280,14 @@ curl http://localhost:3000/metrics/export
 
 #### Quick Docker Setup
 ```bash
-# Build and start all services
+# Development environment
 docker-compose up -d
+
+# Production environment
+docker-compose -f docker/docker-compose.prod.yml up -d
+
+# Distributed setup
+docker-compose -f docker/docker-compose.distributed.yml up -d
 
 # View logs
 docker-compose logs -f api-rate-limiter
