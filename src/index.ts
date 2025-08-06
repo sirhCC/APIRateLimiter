@@ -394,7 +394,7 @@ app.get('/health', validateSystemEndpoint(undefined, HealthResponseSchema), (req
 
 // Dashboard endpoint
 app.get('/dashboard', (req, res) => {
-  res.sendFile(path.join(__dirname, '../dashboard.html'));
+  res.sendFile(path.join(__dirname, '../public/dashboard.html'));
 });
 
 // Redirect root to dashboard
@@ -683,10 +683,43 @@ app.get('/secure/data',
 app.get('/stats', validateSystemEndpoint(undefined, StatsResponseSchema), async (req: Request, res: Response) => {
   try {
     const simpleStats = stats.getStats();
+    
+    // Transform endpoints array to object format
+    const endpoints: Record<string, any> = {};
+    if (simpleStats.topEndpoints) {
+      simpleStats.topEndpoints.forEach(([endpoint, count]: [string, number]) => {
+        endpoints[endpoint] = {
+          requests: count,
+          blocked: 0, // This would need tracking for accurate data
+          lastAccess: new Date().toISOString(),
+        };
+      });
+    }
+    
+    // Transform IPs array to object format  
+    const ips: Record<string, any> = {};
+    if (simpleStats.topIPs) {
+      simpleStats.topIPs.forEach(([ip, count]: [string, number]) => {
+        ips[ip] = {
+          requests: count,
+          blocked: 0, // This would need tracking for accurate data
+          lastAccess: new Date().toISOString(),
+        };
+      });
+    }
+    
     res.json({
       message: 'API Rate Limiter Statistics',
       timestamp: new Date().toISOString(),
-      stats: simpleStats,
+      stats: {
+        totalRequests: simpleStats.totalRequests,
+        blockedRequests: simpleStats.blockedRequests,
+        allowedRequests: simpleStats.allowedRequests,
+        startTime: new Date(simpleStats.startTime).toISOString(),
+        uptime: simpleStats.uptime,
+        endpoints,
+        ips,
+      },
     });
   } catch (error) {
     res.status(500).json({ 
