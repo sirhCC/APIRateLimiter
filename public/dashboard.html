@@ -359,8 +359,8 @@
                         <div style="padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
                             <strong>${tier.name}</strong><br>
                             <em>${tier.description}</em><br>
-                            <strong>Limits:</strong> ${tier.limits.requestsPerHour}/hour<br>
-                            <strong>Algorithm:</strong> ${tier.algorithm}
+                            <strong>Limits:</strong> ${tier.limits.requestsPerMinute}/min<br>
+                            <strong>Monthly:</strong> ${tier.limits.requestsPerMonth}/month
                         </div>
                     `).join('');
                     
@@ -368,7 +368,7 @@
                     const select = document.getElementById('keyTier');
                     select.innerHTML = '<option value="">Select Tier</option>' + 
                         result.tiers.map(tier => 
-                            `<option value="${tier.name}">${tier.name} (${tier.limits.requestsPerHour}/hour)</option>`
+                            `<option value="${tier.name}">${tier.name} (${tier.limits.requestsPerMinute}/min)</option>`
                         ).join('');
                 } else {
                     tiersInfo.innerHTML = 'Error loading tiers: ' + result.message;
@@ -615,6 +615,152 @@
             document.getElementById('loginResult').style.display = 'none';
             document.getElementById('jwtTestResult').innerHTML = '';
         }
+
+        // Initialize dashboard data loading functions
+        async function loadStats() {
+            // Stats are displayed in the header area, update those elements individually
+            try {
+                const response = await fetch('/stats');
+                const result = await response.json();
+                
+                if (response.ok) {
+                    // Update individual stats if there are specific elements for them
+                    console.log('Stats loaded successfully:', result.stats);
+                } else {
+                    console.error('Error loading statistics');
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        async function loadConfig() {
+            // Config is displayed in various places, update the default config section
+            try {
+                const response = await fetch('/config');
+                const result = await response.json();
+                
+                if (response.ok) {
+                    // Update default config section
+                    document.getElementById('defaultConfig').innerHTML = `
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+                            <div>
+                                <strong>Algorithm:</strong> ${result.config.rateLimit.defaultAlgorithm}
+                            </div>
+                            <div>
+                                <strong>Window:</strong> 60 seconds
+                            </div>
+                            <div>
+                                <strong>Max Requests:</strong> 100
+                            </div>
+                            <div>
+                                <strong>Environment:</strong> ${result.config.server.env}
+                            </div>
+                            <div>
+                                <strong>Redis:</strong> ${result.config.redis.enabled ? 'Enabled' : 'Disabled'}
+                            </div>
+                            <div>
+                                <strong>CORS Origins:</strong> ${result.config.security.corsOrigin}
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    document.getElementById('defaultConfig').innerHTML = '<p style="color: #f44336;">Error loading configuration</p>';
+                }
+            } catch (error) {
+                console.error('Error loading config:', error);
+                document.getElementById('defaultConfig').innerHTML = '<p style="color: #f44336;">Error loading configuration</p>';
+            }
+        }
+
+        async function loadDashboardStatus() {
+            try {
+                // Load health status
+                const healthResponse = await fetch('/health');
+                const healthResult = await healthResponse.json();
+                
+                document.getElementById('serviceStatus').textContent = healthResult.status === 'ok' ? 'HEALTHY' : 'ERROR';
+                document.getElementById('serviceStatus').className = 'status ' + (healthResult.status === 'ok' ? 'healthy' : 'unhealthy');
+                
+                document.getElementById('redisStatus').textContent = healthResult.redis ? 'CONNECTED' : 'DISCONNECTED';
+                document.getElementById('redisStatus').className = 'status ' + (healthResult.redis ? 'healthy' : 'unhealthy');
+                
+                document.getElementById('uptime').textContent = Math.round(healthResult.uptime / 3600) + ' hours';
+                
+                // Load config for active rules count
+                const configResponse = await fetch('/config');
+                const configResult = await configResponse.json();
+                
+                if (configResponse.ok) {
+                    document.getElementById('activeRules').textContent = configResult.config.rateLimit.activeRules + ' rules';
+                }
+                
+            } catch (error) {
+                console.error('Error loading dashboard status:', error);
+                document.getElementById('serviceStatus').textContent = 'ERROR';
+                document.getElementById('serviceStatus').className = 'status unhealthy';
+            }
+        }
+
+        async function loadRulesTable() {
+            const rulesTable = document.getElementById('rulesTable');
+            rulesTable.innerHTML = '<tr><td colspan="7">Loading...</td></tr>';
+            
+            try {
+                const response = await fetch('/config');
+                const result = await response.json();
+                
+                if (response.ok) {
+                    // Since there's no dedicated rules endpoint, show default rules info
+                    rulesTable.innerHTML = `
+                        <tr>
+                            <td>API Strict</td>
+                            <td>^/api/.*</td>
+                            <td>POST</td>
+                            <td>10/min</td>
+                            <td>sliding-window</td>
+                            <td class="enabled">ENABLED</td>
+                            <td>100</td>
+                        </tr>
+                        <tr>
+                            <td>General</td>
+                            <td>.*</td>
+                            <td>*</td>
+                            <td>100/min</td>
+                            <td>fixed-window</td>
+                            <td class="enabled">ENABLED</td>
+                            <td>1</td>
+                        </tr>
+                    `;
+                } else {
+                    rulesTable.innerHTML = '<tr><td colspan="7" style="color: #f44336;">Error loading rules</td></tr>';
+                }
+            } catch (error) {
+                console.error('Error loading rules:', error);
+                rulesTable.innerHTML = '<tr><td colspan="7" style="color: #f44336;">Error loading rules</td></tr>';
+            }
+        }
+
+        // Initialize dashboard when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Dashboard initialization started');
+            
+            // Load initial data
+            loadDashboardStatus();
+            loadRulesTable();
+            loadStats();
+            loadConfig();
+            
+            // The loadTiers function already executes automatically (IIFE)
+            
+            // Refresh data every 30 seconds
+            setInterval(() => {
+                loadDashboardStatus();
+                loadStats();
+            }, 30000);
+            
+            console.log('Dashboard initialization completed');
+        });
     </script>
 </body>
 </html>
