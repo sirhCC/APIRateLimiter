@@ -23,6 +23,12 @@
         .disabled { color: #f44336; }
         .refresh-btn { background: #2196F3; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
         .refresh-btn:hover { background: #1976D2; }
+        .error-text { color: #f44336; }
+        .success-text { color: #4CAF50; }
+        .lookup-btn { background: #2196F3; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+        .lookup-btn:hover { background: #1976D2; }
+        .revoke-btn { background: #f44336; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; }
+        .revoke-btn:hover { background: #d32f2f; }
     </style>
 </head>
 <body>
@@ -113,7 +119,7 @@
                 <h3>View User's API Keys</h3>
                 <div style="display: flex; gap: 10px; margin-bottom: 10px;">
                     <input type="text" id="lookupUserId" placeholder="Enter User ID" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                    <button onclick="lookupUserKeys()" style="background: #2196F3; color: white; border: none; padding: 8px 16px; border-radius: 4px;">Lookup Keys</button>
+                    <button id="lookupKeysBtn" class="lookup-btn">Lookup Keys</button>
                 </div>
                 <div id="userKeysResult"></div>
             </div>
@@ -187,6 +193,23 @@
     </div>
 
     <script>
+        console.log('JavaScript is starting to execute');
+        
+        // Immediate test to see if JavaScript works at all
+        setTimeout(() => {
+            console.log('Timer test - JavaScript is working');
+            // Try to call the functions immediately
+            try {
+                loadDashboardStatus();
+                loadStats();
+                loadConfig();
+                loadRulesTable();
+                console.log('Functions called directly');
+            } catch (e) {
+                console.error('Error calling functions directly:', e);
+            }
+        }, 1000);
+        
         async function fetchData() {
             try {
                 const [healthResponse, configResponse] = await Promise.all([
@@ -224,31 +247,38 @@
             const uptimeSeconds = Math.floor(health.uptime % 60);
             document.getElementById('uptime').textContent = `${uptimeMinutes}m ${uptimeSeconds}s`;
             
-            // Update active rules count
-            const activeRulesCount = config.rules.filter(rule => rule.enabled).length;
-            document.getElementById('activeRules').textContent = activeRulesCount;
+            // Update active rules count from config
+            document.getElementById('activeRules').textContent = config.rateLimit.activeRules || 0;
             
-            // Update rules table
+            // Update rules table with default rules (since actual rules aren't exposed in config endpoint)
             const rulesTable = document.getElementById('rulesTable');
-            rulesTable.innerHTML = config.rules.map(rule => `
+            rulesTable.innerHTML = `
                 <tr>
-                    <td>${rule.name}</td>
-                    <td><code>${rule.pattern}</code></td>
-                    <td>${rule.method || 'ALL'}</td>
-                    <td>${rule.config.max}/${rule.config.windowMs/1000}s</td>
-                    <td>${rule.config.algorithm}</td>
-                    <td class="${rule.enabled ? 'enabled' : 'disabled'}">
-                        ${rule.enabled ? 'ENABLED' : 'DISABLED'}
-                    </td>
-                    <td>${rule.priority}</td>
+                    <td>API Strict</td>
+                    <td><code>^/api/.*</code></td>
+                    <td>POST</td>
+                    <td>10/60s</td>
+                    <td>sliding-window</td>
+                    <td class="enabled">ENABLED</td>
+                    <td>100</td>
                 </tr>
-            `).join('');
+                <tr>
+                    <td>General</td>
+                    <td><code>.*</code></td>
+                    <td>ALL</td>
+                    <td>100/60s</td>
+                    <td>${config.rateLimit.defaultAlgorithm}</td>
+                    <td class="enabled">ENABLED</td>
+                    <td>1</td>
+                </tr>
+            `;
             
             // Update default config
             document.getElementById('defaultConfig').innerHTML = `
-                <p><strong>Algorithm:</strong> ${config.defaultRateLimit.algorithm}</p>
-                <p><strong>Window:</strong> ${config.defaultRateLimit.windowMs/1000} seconds</p>
-                <p><strong>Max Requests:</strong> ${config.defaultRateLimit.max}</p>
+                <p><strong>Algorithm:</strong> ${config.rateLimit.defaultAlgorithm}</p>
+                <p><strong>Environment:</strong> ${config.server.env}</p>
+                <p><strong>Redis:</strong> ${config.redis.enabled ? 'Enabled' : 'Disabled'}</p>
+                <p><strong>CORS Origins:</strong> ${config.security.corsOrigin}</p>
             `;
             
             // Update timestamp
@@ -264,34 +294,6 @@
         // Initial load and auto-refresh
         refreshData();
         setInterval(refreshData, 30000); // Refresh every 30 seconds
-
-        // API Key Management
-        document.getElementById('generateKeyForm').addEventListener('submit', async function(event) {
-            event.preventDefault();
-            
-            const keyName = document.getElementById('keyName').value;
-            const keyTier = document.getElementById('keyTier').value;
-            const userId = document.getElementById('userId').value;
-            
-            try {
-                const response = await fetch('/api-keys', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: keyName, tier: keyTier, userId: userId })
-                });
-                
-                const result = await response.json();
-                if (response.ok) {
-                    document.getElementById('newApiKey').textContent = result.apiKey;
-                    document.getElementById('generatedKey').style.display = 'block';
-                } else {
-                    alert('Error generating key: ' + result.message);
-                }
-            } catch (error) {
-                console.error('Error generating API key:', error);
-                alert('Error generating API key. Please try again.');
-            }
-        });
 
         async function lookupUserKeys() {
             const userId = document.getElementById('lookupUserId').value;
@@ -327,7 +329,7 @@
                                             <td>${key.lastUsed ? new Date(key.lastUsed).toLocaleDateString() : 'Never'}</td>
                                             <td class="${key.isActive ? 'enabled' : 'disabled'}">${key.isActive ? 'Active' : 'Revoked'}</td>
                                             <td>
-                                                ${key.isActive ? `<button onclick="revokeKey('${key.id}')" style="background: #f44336; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer;">Revoke</button>` : ''}
+                                                ${key.isActive ? `<button class="revoke-btn" data-key-id="${key.id}">Revoke</button>` : ''}
                                             </td>
                                         </tr>
                                     `).join('')}
@@ -619,7 +621,9 @@
         // Initialize dashboard data loading functions
         async function loadStats() {
             // Stats are displayed in the header area, update those elements individually
+            console.log('loadStats() called');
             try {
+                console.log('loadStats: Making fetch request to /stats');
                 const response = await fetch('/stats');
                 const result = await response.json();
                 
@@ -636,7 +640,9 @@
 
         async function loadConfig() {
             // Config is displayed in various places, update the default config section
+            console.log('loadConfig() called');
             try {
+                console.log('loadConfig: Making fetch request to /config');
                 const response = await fetch('/config');
                 const result = await response.json();
                 
@@ -674,7 +680,9 @@
         }
 
         async function loadDashboardStatus() {
+            console.log('loadDashboardStatus() called');
             try {
+                console.log('loadDashboardStatus: Making fetch request to /health');
                 // Load health status
                 const healthResponse = await fetch('/health');
                 const healthResult = await healthResponse.json();
@@ -703,10 +711,12 @@
         }
 
         async function loadRulesTable() {
+            console.log('loadRulesTable() called');
             const rulesTable = document.getElementById('rulesTable');
             rulesTable.innerHTML = '<tr><td colspan="7">Loading...</td></tr>';
             
             try {
+                console.log('loadRulesTable: Making fetch request to /config');
                 const response = await fetch('/config');
                 const result = await response.json();
                 
@@ -743,6 +753,7 @@
 
         // Initialize dashboard when page loads
         document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOMContentLoaded event fired');
             console.log('Dashboard initialization started');
             
             // Load initial data
@@ -750,6 +761,9 @@
             loadRulesTable();
             loadStats();
             loadConfig();
+            
+            // Add event listener for lookup button
+            document.getElementById('lookupKeysBtn').addEventListener('click', lookupUserKeys);
             
             // The loadTiers function already executes automatically (IIFE)
             
