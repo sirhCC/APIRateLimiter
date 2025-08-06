@@ -124,3 +124,6 @@ README_*.md
 
 # Test artifacts
 test-startup.*
+
+# GitHub workflows (if not needed)
+.github/workflows/
