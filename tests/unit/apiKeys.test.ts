@@ -215,6 +215,41 @@ describe('API Key Utilities', () => {
       const userKeys = await apiKeyManager.getUserKeys('no-keys-user');
       expect(userKeys).toHaveLength(0);
     });
+
+    it('should rotate an API key and allow old key during grace period', async () => {
+      const result = await apiKeyManager.generateApiKey({
+        name: 'Rotatable Key',
+        tier: 'free',
+        userId: 'rotation-user'
+      });
+      const oldPlain = result.apiKey;
+      const keyId = result.metadata.id;
+
+      const rotation = await apiKeyManager.rotateApiKey(keyId, { gracePeriodMs: 2000 });
+      expect(rotation).not.toBeNull();
+      const newPlain = rotation!.newApiKey;
+      expect(newPlain).not.toEqual(oldPlain);
+
+      // Both old and new should validate within grace window
+      const oldMeta = await apiKeyManager.validateApiKey(oldPlain);
+      expect(oldMeta).not.toBeNull();
+      const newMeta = await apiKeyManager.validateApiKey(newPlain);
+      expect(newMeta).not.toBeNull();
+
+      // Simulate grace expiry by manually expiring previousKeyHashes
+      const metadata = await apiKeyManager.getKeyMetadata(keyId);
+      if (metadata && metadata.previousKeyHashes) {
+        metadata.previousKeyHashes = metadata.previousKeyHashes.map(p => ({ ...p, expiresAt: Date.now() - 10 }));
+        // Force update through private path (reusing update method via rotation pattern not accessible); casting for test purposes
+        // @ts-ignore accessing private method for test environment is avoided; fallback to revoke + reapply
+        await (apiKeyManager as any).updateKeyMetadata(metadata);
+      }
+
+      const oldAfterExpiry = await apiKeyManager.validateApiKey(oldPlain);
+      expect(oldAfterExpiry).toBeNull();
+      const newStillValid = await apiKeyManager.validateApiKey(newPlain);
+      expect(newStillValid).not.toBeNull();
+    });
   });
 
   describe('Usage Tracking', () => {

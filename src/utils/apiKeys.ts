@@ -24,6 +24,11 @@ export interface ApiKeyMetadata {
   created: number;
   lastUsed?: number;
   isActive: boolean;
+  /**
+   * Previous key hashes (for rotation) retained until expiresAt (epoch ms).
+   * Old plaintext keys corresponding to these hashes remain valid until expiry.
+   */
+  previousKeyHashes?: { hash: string; expiresAt: number }[];
   usage: {
     totalRequests: number;
     currentMonthRequests: number;
@@ -41,6 +46,7 @@ export class ApiKeyManager {
   private keyPrefix = 'api_key:';
   private metadataPrefix = 'api_key_meta:';
   private userKeysPrefix = 'user_keys:';
+  private hashSecret: string;
 
   // Predefined tiers
   private defaultTiers: Record<string, ApiKeyTier> = {
@@ -80,6 +86,8 @@ export class ApiKeyManager {
 
   constructor(redis: RedisClient) {
     this.redis = redis;
+    // Secret to salt API key hashes (defends against rainbow table). Provide via env.
+    this.hashSecret = process.env.API_KEY_HASH_SECRET || 'dev-insecure-secret-change-me';
   }
 
   /**
@@ -152,7 +160,24 @@ export class ApiKeyManager {
       
       const metadata = await this._getKeyMetadata(keyId);
       
-      if (!metadata || metadata.key !== keyHash || !metadata.isActive) {
+      if (!metadata || !metadata.isActive) {
+        return null;
+      }
+
+      let match = metadata.key === keyHash;
+
+      // If no primary match, attempt previous (rotation grace) matches
+      if (!match && metadata.previousKeyHashes && metadata.previousKeyHashes.length > 0) {
+        const now = Date.now();
+        // Prune expired first
+        const beforeLen = metadata.previousKeyHashes.length;
+        metadata.previousKeyHashes = metadata.previousKeyHashes.filter(p => p.expiresAt > now);
+        if (metadata.previousKeyHashes.length !== beforeLen) {
+          await this.updateKeyMetadata(metadata); // persist pruning
+        }
+        match = metadata.previousKeyHashes.some(p => p.hash === keyHash);
+        if (!match) return null; // not matched anywhere
+      } else if (!match) {
         return null;
       }
 
@@ -169,6 +194,31 @@ export class ApiKeyManager {
       });
       return null;
     }
+  }
+
+  /**
+   * Rotate an existing API key while allowing the old key to work for a grace period.
+   * Generates a new plaintext key using same key ID so clients only need to update the tail.
+   * @param keyId
+   * @param options.gracePeriodMs Duration old key remains valid (default 1h)
+   */
+  async rotateApiKey(keyId: string, options: { gracePeriodMs?: number } = {}): Promise<{ newApiKey: string; metadata: ApiKeyMetadata } | null> {
+    const { gracePeriodMs = 1000 * 60 * 60 } = options; // 1 hour default
+    const metadata = await this._getKeyMetadata(keyId);
+    if (!metadata || !metadata.isActive) return null;
+
+    const now = Date.now();
+    const expiresAt = now + gracePeriodMs;
+    if (!metadata.previousKeyHashes) metadata.previousKeyHashes = [];
+
+    // Append current active key hash to previous list with expiry
+    metadata.previousKeyHashes.push({ hash: metadata.key, expiresAt });
+
+    // Generate new key (reuse keyId for predictable prefix)
+    const newPlain = this.generateSecureKey(keyId);
+    metadata.key = this.hashKey(newPlain);
+    await this.updateKeyMetadata(metadata);
+    return { newApiKey: newPlain, metadata };
   }
 
   /**
@@ -316,7 +366,8 @@ export class ApiKeyManager {
   }
 
   private hashKey(apiKey: string): string {
-    return createHash('sha256').update(apiKey).digest('hex');
+    // HMAC style hashing using secret + key material
+    return createHash('sha256').update(this.hashSecret + ':' + apiKey).digest('hex');
   }
 
   private async storeKeyMetadata(metadata: ApiKeyMetadata): Promise<void> {
