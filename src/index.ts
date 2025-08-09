@@ -674,7 +674,7 @@ app.get('/auth/verify', requireJWT(appConfig.security.jwtSecret), validateSystem
   });
 });
 
-// Metrics endpoint (Prometheus format)
+// Metrics endpoint (Prometheus format - consolidated single source)
 app.get('/metrics', async (req: Request, res: Response): Promise<void> => {
   if (process.env.METRICS_ENABLED === 'false') {
     res.status(404).json({ error: 'Metrics disabled' });
@@ -684,7 +684,18 @@ app.get('/metrics', async (req: Request, res: Response): Promise<void> => {
     const metrics = await renderMetrics();
     res.set('Content-Type', 'text/plain; version=0.0.4');
     res.send(metrics);
+    // Log access (moved from legacy manual metrics implementation)
+    log.system('Prometheus metrics endpoint accessed', {
+      endpoint: '/metrics',
+      ip: req.ip,
+      userAgent: req.get('User-Agent')
+    });
   } catch (err) {
+    log.system('Metrics endpoint error', {
+      error: err instanceof Error ? err.message : String(err),
+      severity: 'medium' as const,
+      endpoint: '/metrics'
+    });
     res.status(500).json({ error: 'Failed to render metrics' });
   }
 });
@@ -790,90 +801,7 @@ app.get('/stats', validateSystemEndpoint(undefined, StatsResponseSchema), async 
   }
 });
 
-// Prometheus metrics endpoint for production monitoring
-app.get('/metrics', (req: Request, res: Response) => {
-  try {
-    const simpleStats = stats.getStats();
-    const performanceStats = performanceMonitor.getStats();
-    const currentMemory = process.memoryUsage();
-    const timestamp = Date.now();
-    
-    // Generate Prometheus-compatible metrics
-    const metrics = [
-      // Request metrics
-      `# HELP api_requests_total Total number of API requests`,
-      `# TYPE api_requests_total counter`,
-      `api_requests_total{status="success"} ${simpleStats.totalRequests - simpleStats.totalBlocked}`,
-      `api_requests_total{status="blocked"} ${simpleStats.totalBlocked}`,
-      
-      // Response time metrics
-      `# HELP api_response_time_milliseconds Response time in milliseconds`,
-      `# TYPE api_response_time_milliseconds histogram`,
-      `api_response_time_milliseconds{quantile="0.5"} ${performanceStats.p50ResponseTime}`,
-      `api_response_time_milliseconds{quantile="0.95"} ${performanceStats.p95ResponseTime}`,
-      `api_response_time_milliseconds{quantile="0.99"} ${performanceStats.p99ResponseTime}`,
-      `api_response_time_milliseconds_sum ${performanceStats.totalRequests * performanceStats.averageResponseTime}`,
-      `api_response_time_milliseconds_count ${performanceStats.totalRequests}`,
-      
-      // Rate limiting metrics
-      `# HELP rate_limit_blocked_total Total number of rate limited requests`,
-      `# TYPE rate_limit_blocked_total counter`,
-      `rate_limit_blocked_total ${simpleStats.totalBlocked}`,
-      
-      // Memory metrics (current process memory)
-      `# HELP memory_usage_bytes Memory usage in bytes`,
-      `# TYPE memory_usage_bytes gauge`,
-      `memory_usage_bytes{type="heap_used"} ${currentMemory.heapUsed}`,
-      `memory_usage_bytes{type="heap_total"} ${currentMemory.heapTotal}`,
-      `memory_usage_bytes{type="external"} ${currentMemory.external}`,
-      `memory_usage_bytes{type="rss"} ${currentMemory.rss}`,
-      
-      // Performance trend metrics
-      `# HELP memory_trend_increasing Memory usage trend`,
-      `# TYPE memory_trend_increasing gauge`,
-      `memory_trend_increasing ${performanceStats.memoryTrend.increasing ? 1 : 0}`,
-      
-      // Error rate metrics
-      `# HELP api_error_rate_percent Error rate percentage`,
-      `# TYPE api_error_rate_percent gauge`,
-      `api_error_rate_percent ${performanceStats.errorRate}`,
-      
-      // Requests per second
-      `# HELP api_requests_per_second Current requests per second`,
-      `# TYPE api_requests_per_second gauge`,
-      `api_requests_per_second ${performanceStats.requestsPerSecond}`,
-      
-      // Uptime metrics
-      `# HELP uptime_seconds Uptime in seconds`,
-      `# TYPE uptime_seconds counter`,
-      `uptime_seconds ${process.uptime()}`,
-      
-      // Redis metrics (basic connectivity)
-      `# HELP redis_connected Redis connection status`,
-      `# TYPE redis_connected gauge`,
-      `redis_connected ${redis ? 1 : 0}`,
-      
-      ''
-    ].join('\n');
-    
-    res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
-    res.send(metrics);
-    
-    log.system('Prometheus metrics endpoint accessed', {
-      endpoint: '/metrics',
-      ip: req.ip,
-      userAgent: req.get('User-Agent')
-    });
-    
-  } catch (error) {
-    log.system('Metrics endpoint error', {
-      error: error instanceof Error ? error.message : String(error),
-      severity: 'medium' as const,
-      endpoint: '/metrics'
-    });
-    res.status(500).send('Error generating metrics');
-  }
-});
+// (Legacy manual /metrics implementation removed in favor of consolidated Prometheus registry output.)
 
 // Performance stats endpoint
 app.get('/performance', validateSystemEndpoint(undefined, PerformanceResponseSchema), (req: Request, res: Response) => {
