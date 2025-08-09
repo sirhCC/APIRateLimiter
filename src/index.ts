@@ -20,6 +20,7 @@ import { createOptimizedRateLimiter, RateLimitPresets } from './middleware/optim
 import { validateJwtEndpoint, validateApiKeyEndpoint, validateRuleEndpoint, validateSystemEndpoint } from './middleware/validation';
 import { ApiRateLimiterConfig, RateLimitRule } from './types';
 import { log, loggerMiddleware } from './utils/logger';
+import { renderMetrics } from './utils/metrics';
 
 // Import all validation schemas
 import {
@@ -643,6 +644,21 @@ app.get('/auth/verify', requireJWT(appConfig.security.jwtSecret), validateSystem
     } : undefined,
     message: 'Token is valid',
   });
+});
+
+// Metrics endpoint (Prometheus format)
+app.get('/metrics', async (req: Request, res: Response): Promise<void> => {
+  if (process.env.METRICS_ENABLED === 'false') {
+    res.status(404).json({ error: 'Metrics disabled' });
+    return;
+  }
+  try {
+    const metrics = await renderMetrics();
+    res.set('Content-Type', 'text/plain; version=0.0.4');
+    res.send(metrics);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to render metrics' });
+  }
 });
 
 // Admin-only endpoint
