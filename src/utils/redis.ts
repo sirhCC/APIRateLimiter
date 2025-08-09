@@ -15,6 +15,9 @@ export class RedisClient {
   private circuitBreakerThreshold = 5;
   private circuitBreakerResetAfterMs = 30000; // 30s
   private lastFailureTime = 0;
+  private lastPingLatency: number | null = null;
+  private lastPingAt = 0;
+  private pingCacheMs = 5000;
 
   constructor(config: { host: string; port: number; password?: string; db?: number; enabled?: boolean }) {
     this.isEnabled = config.enabled !== false;
@@ -181,6 +184,42 @@ export class RedisClient {
 
   isHealthy(): boolean {
   return this.isRedisAvailable();
+  }
+
+  /**
+   * Lightweight status snapshot for readiness probes.
+   */
+  getStatus() {
+    return {
+      enabled: this.isEnabled,
+      connected: this.isConnected,
+      healthy: this.isHealthy(),
+      circuitBreakerOpen: this.circuitBreakerOpen,
+      consecutiveFailures: this.consecutiveFailures,
+      lastFailureTime: this.lastFailureTime || null,
+      lastPingLatency: this.lastPingLatency,
+    };
+  }
+
+  /**
+   * Measure Redis PING latency (cached for a few seconds to avoid thundering herd).
+   */
+  async pingLatency(): Promise<number | null> {
+    const now = Date.now();
+    if (now - this.lastPingAt < this.pingCacheMs && this.lastPingLatency !== null) {
+      return this.lastPingLatency;
+    }
+    if (!this.isRedisAvailable()) return null;
+    try {
+      const start = Date.now();
+      await this.client!.ping();
+      this.lastPingLatency = Date.now() - start;
+      this.lastPingAt = now;
+      return this.lastPingLatency;
+    } catch (_e) {
+      this.registerFailure('ping');
+      return null;
+    }
   }
 
   async tokenBucket(key: string, capacity: number, tokens: number, intervalMs: number): Promise<{ allowed: boolean; remainingTokens: number }> {
