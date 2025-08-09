@@ -191,7 +191,13 @@ export const ResetResponseSchema = z.object({
 export const HealthResponseSchema = z.object({
   status: z.enum(['ok', 'degraded', 'error']),
   timestamp: z.string(),
-  redis: z.boolean(),
+  // Backward compatible: originally boolean, now may be object with details
+  redis: z.union([z.boolean(), z.object({
+    enabled: z.boolean(),
+    healthy: z.boolean(),
+    connected: z.boolean(),
+    circuitBreakerOpen: z.boolean().optional(),
+  })]),
   uptime: z.number(),
   version: z.string().optional(),
   environment: z.string().optional(),
