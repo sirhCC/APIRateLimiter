@@ -395,16 +395,44 @@ app.use(createAutoSensitiveRateLimiter(redis));
 
 // Health check endpoint
 app.get('/health', validateSystemEndpoint(undefined, HealthResponseSchema), (req: Request, res: Response) => {
+  const status = redis.getStatus();
   const health = {
-    status: redis.isHealthy() ? 'ok' as const : 'error' as const,
+    status: status.healthy ? 'ok' as const : 'error' as const,
     timestamp: new Date().toISOString(),
-    redis: redis.isHealthy(),
+    redis: {
+      enabled: status.enabled,
+      healthy: status.healthy,
+      connected: status.connected,
+      circuitBreakerOpen: status.circuitBreakerOpen,
+    },
     uptime: process.uptime(),
     version: process.env.npm_package_version,
     environment: process.env.NODE_ENV || 'development',
   };
+  res.status(status.healthy ? 200 : 503).json(health);
+});
 
-  res.status(redis.isHealthy() ? 200 : 503).json(health);
+// Readiness endpoint (heavier checks)
+app.get('/ready', async (req: Request, res: Response) => {
+  const status = redis.getStatus();
+  const ping = await redis.pingLatency();
+  const ready = status.healthy && !status.circuitBreakerOpen;
+  res.status(ready ? 200 : 503).json({
+    status: ready ? 'ready' : 'not-ready',
+    timestamp: new Date().toISOString(),
+    redis: {
+      ...status,
+      pingLatencyMs: ping,
+    },
+    config: {
+      defaultAlgorithm: appConfig.defaultRateLimit.algorithm,
+      rules: appConfig.rules.length,
+    },
+    process: {
+      pid: process.pid,
+      uptime: process.uptime(),
+    }
+  });
 });
 
 // Dashboard endpoint
@@ -1227,58 +1255,68 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   });
 });
 
-// Start server
-const server = app.listen(appConfig.server.port, appConfig.server.host, () => {
-  log.system('API Rate Limiter started', {
-    host: appConfig.server.host,
-    port: appConfig.server.port,
-    redisHost: appConfig.redis.host,
-    redisPort: appConfig.redis.port,
-    redisEnabled: appConfig.redis.enabled,
-    defaultAlgorithm: appConfig.defaultRateLimit.algorithm,
-    activeRules: appConfig.rules.length,
-    environment: process.env.NODE_ENV || 'development',
-    metadata: {
-      performanceMonitoring: true,
-      cleanupTaskStarted: true
-    }
+let server: any = null;
+if (process.env.NODE_ENV !== 'test') {
+  server = app.listen(appConfig.server.port, appConfig.server.host, () => {
+    log.system('API Rate Limiter started', {
+      host: appConfig.server.host,
+      port: appConfig.server.port,
+      redisHost: appConfig.redis.host,
+      redisPort: appConfig.redis.port,
+      redisEnabled: appConfig.redis.enabled,
+      defaultAlgorithm: appConfig.defaultRateLimit.algorithm,
+      activeRules: appConfig.rules.length,
+      environment: process.env.NODE_ENV || 'development',
+      metadata: {
+        performanceMonitoring: true,
+        cleanupTaskStarted: true
+      }
+    });
   });
-});
 
-// Handle server startup errors
-server.on('error', (err: any) => {
-  log.system('Server startup error', {
-    error: err.message,
-    port: appConfig.server.port,
-    host: appConfig.server.host,
-    severity: 'critical',
-    metadata: { errorCode: err.code }
+  server.on('error', (err: any) => {
+    log.system('Server startup error', {
+      error: err.message,
+      port: appConfig.server.port,
+      host: appConfig.server.host,
+      severity: 'critical',
+      metadata: { errorCode: err.code }
+    });
+    process.exit(1);
   });
-  process.exit(1);
-});
 
-// Start performance monitoring cleanup
-startPerformanceCleanup();
+  startPerformanceCleanup();
+}
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   log.system('Received SIGTERM, shutting down gracefully', {
     signal: 'SIGTERM'
   });
-  server.close(async () => {
+  if (server) {
+    server.close(async () => {
+      await redis.disconnect();
+      process.exit(0);
+    });
+  } else {
     await redis.disconnect();
     process.exit(0);
-  });
+  }
 });
 
 process.on('SIGINT', async () => {
   log.system('Received SIGINT, shutting down gracefully', {
     signal: 'SIGINT'
   });
-  server.close(async () => {
+  if (server) {
+    server.close(async () => {
+      await redis.disconnect();
+      process.exit(0);
+    });
+  } else {
     await redis.disconnect();
     process.exit(0);
-  });
+  }
 });
 
 export default app;
