@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { RedisClient } from '../utils/redis.js';
 import { log } from '../utils/logger';
+import { rateLimitDecisionDuration, rateLimitRequestsTotal } from '../utils/metrics';
 
 export interface OptimizedRateLimitConfig {
   windowMs: number;
@@ -39,7 +40,9 @@ export class OptimizedRateLimiter {
    */
   middleware() {
     return async (req: Request, res: Response, next: NextFunction) => {
-      const key = this.config.keyGenerator!(req);
+  const key = this.config.keyGenerator!(req);
+  const endTimer = rateLimitDecisionDuration.startTimer({ algorithm: this.config.algorithm });
+  const source = req.apiKey ? 'apiKey' : (req.isJWTAuthenticated ? 'jwt' : 'ip');
       
       try {
         let result: { allowed: boolean; remaining: number; tokensRemaining?: number };
@@ -100,6 +103,7 @@ export class OptimizedRateLimiter {
         }
 
         if (!result.allowed) {
+          rateLimitRequestsTotal.inc({ algorithm: this.config.algorithm, outcome: 'block', source });
           res.status(429).set('Retry-After', Math.ceil(this.config.windowMs / 1000).toString());
           
           if (this.config.onLimitReached) {
@@ -114,6 +118,7 @@ export class OptimizedRateLimiter {
           return;
         }
 
+        rateLimitRequestsTotal.inc({ algorithm: this.config.algorithm, outcome: 'allow', source });
         next();
       } catch (error) {
         log.system('Rate limiter middleware error - failing open', {
@@ -121,8 +126,12 @@ export class OptimizedRateLimiter {
           algorithm: this.config.algorithm,
           severity: 'medium' as const
         });
+        rateLimitRequestsTotal.inc({ algorithm: this.config.algorithm, outcome: 'error', source });
         // Fail open - allow request if rate limiter fails
         next();
+      }
+      finally {
+        endTimer();
       }
     };
   }
