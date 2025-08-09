@@ -21,6 +21,7 @@ import { validateJwtEndpoint, validateApiKeyEndpoint, validateRuleEndpoint, vali
 import { ApiRateLimiterConfig, RateLimitRule } from './types';
 import { log, loggerMiddleware } from './utils/logger';
 import { renderMetrics } from './utils/metrics';
+import { loadConfig, computeConfigHash } from './utils/config';
 
 // Import all validation schemas
 import {
@@ -54,67 +55,14 @@ validateSecurityOnStartup();
 const corsOptions = setupCors();
 const corsConfig = createCorsConfig();
 
-// Environment validation and setup
-function validateEnvironment() {
-  const errors: string[] = [];
-  const warnings: string[] = [];
-  
-  // Validate JWT secret
-  const jwtSecret = process.env.JWT_SECRET;
-  if (!jwtSecret) {
-    warnings.push('JWT_SECRET not set - using fallback secret for demo/development');
-  } else if (jwtSecret === 'your-super-secret-jwt-key-change-in-production' || 
-             jwtSecret === 'docker-demo-secret-change-in-production' || 
-             jwtSecret === 'fallback-demo-secret-change-in-production') {
-    warnings.push('JWT_SECRET is using default value - change for production');
-  } else if (jwtSecret.length < 32) {
-    warnings.push('JWT_SECRET should be at least 32 characters for security');
-  }
-  
-  // Warn about production settings
-  if (process.env.NODE_ENV === 'production') {
-    if (process.env.DEMO_USERS_ENABLED === 'true') {
-      log.warn('Demo users are enabled in production mode', {
-        category: 'security',
-        severity: 'medium',
-        environment: 'production'
-      });
-    }
-    
-    if (process.env.REDIS_ENABLED !== 'true') {
-      log.warn('Redis is disabled - limited functionality in production', {
-        category: 'system',
-        severity: 'high',
-        environment: 'production'
-      });
-    }
-  }
-  
-  if (errors.length > 0) {
-    log.error('Environment validation failed', null, {
-      category: 'system',
-      errors,
-      severity: 'critical'
-    });
-    process.exit(1);
-  }
-  
-  if (warnings.length > 0) {
-    log.warn('Environment validation warnings', {
-      category: 'system',
-      severity: 'medium',
-      metadata: { warnings }
-    });
-  }
-  
-  log.system('Environment validation passed', {
-    environment: process.env.NODE_ENV || 'development',
-    redisEnabled: process.env.REDIS_ENABLED === 'true'
-  });
-}
-
-// Validate environment before starting
-validateEnvironment();
+// Load and validate config centrally
+const appConfig: ApiRateLimiterConfig = loadConfig();
+log.system('Configuration loaded', {
+  environment: process.env.NODE_ENV || 'development',
+  redisEnabled: appConfig.redis.enabled,
+  defaultAlgorithm: appConfig.defaultRateLimit.algorithm,
+  metadata: { rules: appConfig.rules.length }
+});
 
 const app = express();
 
@@ -141,39 +89,6 @@ app.use(performanceMonitor.middleware()); // Add performance monitoring
 app.use(morgan('combined'));
 app.use(express.json());
 
-// Configuration
-const appConfig: ApiRateLimiterConfig = {
-  redis: {
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT || '6379'),
-    password: process.env.REDIS_PASSWORD,
-    db: parseInt(process.env.REDIS_DB || '0'),
-    enabled: process.env.REDIS_ENABLED === 'true',
-  },
-  server: {
-    port: parseInt(process.env.PORT || '3000'),
-    host: process.env.HOST || '0.0.0.0',
-  },
-  defaultRateLimit: {
-    windowMs: parseInt(process.env.DEFAULT_WINDOW_MS || '60000'), // 1 minute
-    max: parseInt(process.env.DEFAULT_MAX_REQUESTS || '100'),
-    algorithm: (process.env.DEFAULT_ALGORITHM as any) || 'sliding-window',
-  },
-  rules: loadRulesFromConfig(),
-  monitoring: {
-    enabled: process.env.MONITORING_ENABLED !== 'false',
-    statsRetentionMs: parseInt(process.env.STATS_RETENTION_MS || '3600000'), // 1 hour
-  },
-  security: {
-    jwtSecret: process.env.JWT_SECRET || 'fallback-demo-secret-change-in-production',
-    jwtExpiresIn: process.env.JWT_EXPIRES_IN || '24h',
-    jwtAlgorithm: (process.env.JWT_ALGORITHM as any) || 'HS256',
-    demoUsersEnabled: process.env.DEMO_USERS_ENABLED !== 'false',
-    corsOrigin: process.env.CORS_ORIGIN || 'development-default',
-    logAuthEvents: process.env.LOG_AUTH_EVENTS === 'true',
-    logRateLimitViolations: process.env.LOG_RATE_LIMIT_VIOLATIONS === 'true',
-  },
-};
 
 // Initialize Redis client with conditional connection
 const redis = new RedisClient(appConfig.redis);
@@ -474,6 +389,17 @@ app.get('/config', validateSystemEndpoint(undefined, ConfigResponseSchema), (req
   };
 
   res.json(config);
+});
+
+// Config hash endpoint (non-sensitive fingerprint)
+app.get('/config/hash', (req: Request, res: Response) => {
+  const { hash, includedFields } = computeConfigHash(appConfig);
+  res.json({
+    message: 'Configuration fingerprint',
+    hash,
+    includedFields,
+    timestamp: new Date().toISOString(),
+  });
 });
 
 // Rate limit management endpoints

@@ -297,6 +297,14 @@ export const ApiKeyTiersResponseSchema = z.object({
   })),
 });
 
+// Configuration hash response
+export const ConfigHashResponseSchema = z.object({
+  message: z.string(),
+  hash: z.string().length(64, 'Hash must be 64 hex chars'),
+  includedFields: z.array(z.string()),
+  timestamp: z.string(),
+});
+
 // ================================
 // Error Response Schema
 // ================================
@@ -337,3 +345,4 @@ export type PerformanceResponse = z.infer<typeof PerformanceResponseSchema>;
 export type ConfigResponse = z.infer<typeof ConfigResponseSchema>;
 export type ApiKeyTiersResponse = z.infer<typeof ApiKeyTiersResponseSchema>;
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
+export type ConfigHashResponse = z.infer<typeof ConfigHashResponseSchema>;
