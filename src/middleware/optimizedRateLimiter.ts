@@ -96,6 +96,12 @@ export class OptimizedRateLimiter {
           'X-RateLimit-Remaining': result.remaining.toString(),
           'X-RateLimit-Reset': new Date(Date.now() + this.config.windowMs).toISOString(),
           'X-RateLimit-Algorithm': this.config.algorithm,
+          // Draft standard header (IETF RateLimit Fields)
+          // Format: limit;w=window, remaining;w=window, reset=seconds
+          'RateLimit-Policy': `${this.config.maxRequests};w=${Math.ceil(this.config.windowMs/1000)};type=${this.config.algorithm}`,
+          'RateLimit-Limit': this.config.maxRequests.toString(),
+          'RateLimit-Remaining': result.remaining.toString(),
+          'RateLimit-Reset': Math.ceil(this.config.windowMs/1000).toString(),
         });
 
         if (result.tokensRemaining !== undefined) {
@@ -104,7 +110,13 @@ export class OptimizedRateLimiter {
 
         if (!result.allowed) {
           rateLimitRequestsTotal.inc({ algorithm: this.config.algorithm, outcome: 'block', source });
-          res.status(429).set('Retry-After', Math.ceil(this.config.windowMs / 1000).toString());
+          const retryAfterSeconds = Math.ceil(this.config.windowMs / 1000);
+          res.status(429).set({
+            'Retry-After': retryAfterSeconds.toString(),
+            'RateLimit-Reset': retryAfterSeconds.toString(),
+            'RateLimit-Remaining': '0',
+            'X-RateLimit-Remaining': '0'
+          });
           
           if (this.config.onLimitReached) {
             this.config.onLimitReached(req, res);

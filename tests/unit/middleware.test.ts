@@ -110,6 +110,10 @@ describe('Middleware Tests', () => {
         'X-RateLimit-Limit': '100',
         'X-RateLimit-Algorithm': 'token-bucket'
       }));
+      // Also expect new standard headers
+      expect(mockRes.set).toHaveBeenCalledWith(expect.objectContaining({
+        'RateLimit-Limit': '100'
+      }));
       expect(mockNext).toHaveBeenCalled();
     });
 
@@ -165,6 +169,10 @@ describe('Middleware Tests', () => {
       expect(mockRes.status).toHaveBeenCalledWith(429);
       expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({
         error: 'Too Many Requests'
+      }));
+      // Verify 429 sets standard reset headers
+      expect(mockRes.set).toHaveBeenCalledWith(expect.objectContaining({
+        'RateLimit-Remaining': '0'
       }));
       expect(mockNext).not.toHaveBeenCalled();
     });
