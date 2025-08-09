@@ -37,6 +37,11 @@ export function createRateLimitMiddleware(options: RateLimitMiddlewareOptions) {
         'X-RateLimit-Reset': new Date(stats.resetTime).toISOString(),
         'X-RateLimit-Window': config.windowMs.toString(),
         'X-RateLimit-Algorithm': config.algorithm,
+  // Standard draft headers (IETF RateLimit Fields)
+  'RateLimit-Policy': `${config.max};w=${Math.ceil(config.windowMs/1000)};type=${config.algorithm}`,
+  'RateLimit-Limit': config.max.toString(),
+  'RateLimit-Remaining': stats.remainingRequests.toString(),
+  'RateLimit-Reset': Math.ceil((stats.resetTime - Date.now()) / 1000).toString(),
       });
 
       if (matchedRule) {
@@ -53,7 +58,12 @@ export function createRateLimitMiddleware(options: RateLimitMiddlewareOptions) {
           config.onLimitReached(req, res);
         }
 
-        res.status(429).json({
+        res.status(429).set({
+          'Retry-After': Math.ceil((stats.resetTime - Date.now()) / 1000).toString(),
+          'RateLimit-Remaining': '0',
+          'X-RateLimit-Remaining': '0',
+          'RateLimit-Reset': Math.ceil((stats.resetTime - Date.now()) / 1000).toString(),
+        }).json({
           error: 'Too Many Requests',
           message: 'Rate limit exceeded',
           retryAfter: Math.ceil((stats.resetTime - Date.now()) / 1000),
