@@ -1,13 +1,37 @@
+<!-- markdownlint-disable MD029 -->
 # API Rate Limiter Improvement Roadmap
 
 Ordered from highest impact (architecture/security/stability) to lower impact (polish/documentation). Each item includes a brief rationale and proposed approach.
 
+## Current Progress (Updated: 2025-08-08)
+
+Legend: [DONE] completed, [PARTIAL] in progress / partially implemented, [PLANNED] not started.
+
+- [DONE] Redis health/readiness probes with circuit breaker metrics (Item 1) – `/health` & `/ready`, breaker & ping latency, fallback metrics.
+- [PARTIAL] Deterministic test isolation (Item 1.2) – circuit breaker + readiness stable; time abstraction & full Redis mock not yet added.
+- [PARTIAL] Security hardening (Item 1.3) – config loader & hash added; API key hashing + rotation endpoint implemented (grace period); remaining: key prefix patterns, soft-revoke lists, rotation audit logs.
+- [DONE] Observability & Prometheus metrics export (Item 1.5) – `/metrics` endpoint (prom-client), request/decision/redis/fallback histograms & counters.
+- [DONE] Configuration validation & fingerprint (Reliability 3.5 / Minor 47) – centralized zod loader + `/config/hash`.
+- [DONE] Standardized rate limit headers (Minor 42) – Added `RateLimit-*` & `RateLimit-Policy` plus legacy `X-RateLimit-*` to both limiters.
+- [PARTIAL] Safer environment variable parsing (Minor 47) – central config added; still need stricter TS compiler flags & extended schema coverage.
+
+Next Suggested Immediate Steps:
+
+1. Hash & rotate API keys (complete Security Hardening item 3).
+2. Document new endpoints & headers in README/OpenAPI (Developer Experience 5 & Documentation 38).
+3. Add deterministic time provider & Redis mock for algorithm tests (finish Item 1.2).
+4. Integration multi-node test (Critical 7) to validate distributed correctness.
+
+---
+
 ## 1. Critical / High Impact
 
 1. **Redis Dependency Robustness & Health Probing**  
-   - Issue: Logs show frequent fallback to in-memory when Redis not connected.  
-   - Impact: Inconsistent rate limiting across distributed nodes; potential abuse window.  
-   - Actions: Add readiness/liveness probes (HTTP + optional Redis PING); configurable circuit breaker retry/backoff; metrics for fallback activations.
+    - Status: DONE  
+    - Issue: Logs showed fallback to in-memory when Redis not connected.  
+    - Impact: Inconsistent rate limiting across distributed nodes; potential abuse window.  
+    - Actions Implemented: Readiness (`/ready`) + health (`/health`) endpoints, Redis ping latency measurement, circuit breaker with metrics, fallback counters.  
+    - Remaining: Optional configurable backoff tuning & alerting rules.
 2. **Deterministic Test Isolation for Redis & Time**  
    - Issue: Tests rely on real timing / implicit fallbacks; potential flakiness under load.  
    - Actions: Introduce a time abstraction (e.g., `NowProvider`) injectable; mock Redis with an interface to ensure algorithm determinism; add high‑load fuzz test in CI (tagged, optional).
@@ -18,8 +42,10 @@ Ordered from highest impact (architecture/security/stability) to lower impact (p
    - Issue: Static tier configs + limited pattern matching.  
    - Actions: Implement rule priority graph + dynamic reload validation schema; support conditions (method, region, user attributes, JWT claims). Provide dry‑run mode.
 5. **Observability & Metrics Export (Prometheus/OpenTelemetry)**  
-   - Issue: Only internal JSON stats endpoints.  
-   - Actions: Add `/metrics` Prometheus exposition OR OTLP exporter; counters for allowed/blocked per algorithm, latency histograms, Redis ops, fallback counts, API key validation failures.
+    - Status: DONE (Prometheus portion)  
+    - Issue: Previously only internal JSON stats endpoints.  
+    - Actions Implemented: `/metrics` Prometheus exposition (prom-client) with request counters, decision latency histogram, Redis op/fallback metrics, circuit breaker gauges.  
+    - Remaining: OpenTelemetry traces (separate Tracing item) & API key failure counters.
 6. **Backpressure & Burst Protection**  
    - Issue: Current algorithms decide allow/deny but no queueing or shed policy advisory.  
    - Actions: Optional token wait (bounded) or immediate shed with `Retry-After`; add adaptive tightening under high rejection ratio.
@@ -57,7 +83,8 @@ Ordered from highest impact (architecture/security/stability) to lower impact (p
 4. **Error Taxonomy & Structured Logging**  
     - Action: Standardize error codes (e.g., RL001 RedisUnavailable, AK002 KeyRevoked); machine-parsable logs (JSON lines) + sampling for high-frequency events.
 5. **Configuration Validation on Startup**  
-    - Action: Fail-fast with aggregated zod validation errors; expose `/config/hash` endpoint to verify runtime config drift.
+    - Status: DONE (hash + validation baseline)  
+    - Action: Implemented centralized zod config loader + `/config/hash`; need future enhancement for aggregated multi-error reporting & drift alerting.
 
 ## 4. Security Enhancements
 
@@ -124,7 +151,8 @@ Ordered from highest impact (architecture/security/stability) to lower impact (p
 ## 10. Minor Polish
 
 42. **Consistent Header Casing & New Headers**  
-    - Action: Provide `RateLimit-Policy` (IETF draft), ensure case consistency.
+    - Status: DONE  
+    - Action: Implemented `RateLimit-Policy` plus `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` alongside legacy headers; unified 429 responses.
 43. **ESM Build Output Option**  
     - Action: Dual build (CJS + ESM) for broader ecosystem compatibility.
 44. **Package Metadata**  
@@ -134,11 +162,13 @@ Ordered from highest impact (architecture/security/stability) to lower impact (p
 46. **Typed Logger Wrapper**  
     - Action: Add log method overloads & structured context merging.
 47. **Safer Environment Variable Parsing**  
-    - Action: Centralized config module with strict parsing & defaults (partly present; expand).
+    - Status: PARTIAL  
+    - Action: Centralized config module with strict parsing & defaults added; need stricter compiler flags & full schema coverage of remaining env vars.
 48. **Improve Test Naming Consistency**  
     - Action: Use Given/When/Then or descriptive scenario names.
 
 ---
+ 
 ## Suggested Sequencing (First 5 Sprints)
 
 Sprint 1: Redis health probes, metrics export (basic), hashed API keys, config validation.  
@@ -148,20 +178,23 @@ Sprint 4: Key rotation + CLI, anomaly detection baseline, chaos expansion.
 Sprint 5: Tracing, SLO/error budget, rollups + long-term aggregation.
 
 ## Key Metrics to Track Post-Implementation
+
 - Decision latency (avg, p95, p99)
 - Allow vs deny ratio per algorithm & per key tier
-- Redis round trips per request (target <2) 
+- Redis round trips per request (target <2)
 - Fallback activations per minute
 - Unique key cardinality (ip:path, apiKey:path)
 - Error rate by taxonomy code
 - Token refill drift (ms)
 
 ## Acceptance Criteria Examples
+
 - Fallback mode emits structured event within 1s and increments counter.  
 - Integration test ensures 2 concurrent nodes never exceed global limit by >1 request over threshold in 10k run.  
 - Key rotation endpoint returns old key valid for configurable grace window then hard revokes.
 
 ## Risks & Mitigations
+
 - Added complexity → Mitigate via modular interfaces & contracts.  
 - Performance regressions → Add micro-bench CI gate comparing baseline JSON file.  
 - Over-alerting on anomalies → Progressive rollout with shadow metrics first.

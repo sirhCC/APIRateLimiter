@@ -1047,6 +1047,46 @@ app.delete('/api-keys/:keyId', validateApiKeyEndpoint(undefined, undefined, ApiK
   }
 });
 
+// Rotate API key (graceful rotation with gracePeriodMs optional body param)
+app.post('/api-keys/:keyId/rotate', validateApiKeyEndpoint(undefined, undefined, ApiKeyParamsSchema, undefined), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const paramsData = (req as any).validatedParams || req.params;
+    const { keyId } = paramsData;
+    const gracePeriodMs = typeof req.body?.gracePeriodMs === 'number' && req.body.gracePeriodMs > 0 ? req.body.gracePeriodMs : 1000 * 60 * 60; // 1h default
+
+    const rotation = await apiKeyManager.rotateApiKey(keyId, { gracePeriodMs });
+    if (!rotation) {
+      res.status(404).json({
+        error: 'API key not found or inactive',
+        timestamp: new Date().toISOString(),
+        path: req.path,
+        statusCode: 404,
+      });
+      return;
+    }
+
+    res.json({
+      message: 'API key rotated successfully',
+      keyId,
+      apiKey: rotation.newApiKey,
+      gracePeriodMs,
+      graceExpiresAt: new Date(Date.now() + gracePeriodMs).toISOString(),
+      metadata: {
+        tier: rotation.metadata.tier,
+        previousKeyHashes: (rotation.metadata.previousKeyHashes || []).map(p => ({ expiresAt: new Date(p.expiresAt).toISOString() }))
+      }
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      error: 'Failed to rotate API key',
+      message: error.message,
+      timestamp: new Date().toISOString(),
+      path: req.path,
+      statusCode: 500,
+    });
+  }
+});
+
 // Get API key usage statistics
 app.get('/api-keys/:keyId/usage', validateApiKeyEndpoint(undefined, undefined, ApiKeyParamsSchema, ApiKeyUsageResponseSchema), async (req: Request, res: Response): Promise<void> => {
   try {
