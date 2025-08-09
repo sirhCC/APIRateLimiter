@@ -1,5 +1,6 @@
 import Redis from 'ioredis';
 import { inMemoryRateLimit } from './inMemoryRateLimit';
+import { redisFallbackTotal, setRedisUp, setCircuitBreaker } from './metrics';
 
 /**
  * High-performance Redis client with connection pooling and Lua scripts
@@ -9,6 +10,11 @@ export class RedisClient {
   private isConnected: boolean = false;
   private isEnabled: boolean = true;
   private luaScripts: Map<string, string> = new Map();
+  private consecutiveFailures = 0;
+  private circuitBreakerOpen = false;
+  private circuitBreakerThreshold = 5;
+  private circuitBreakerResetAfterMs = 30000; // 30s
+  private lastFailureTime = 0;
 
   constructor(config: { host: string; port: number; password?: string; db?: number; enabled?: boolean }) {
     this.isEnabled = config.enabled !== false;
@@ -33,38 +39,75 @@ export class RedisClient {
       this.client.on('connect', () => {
         console.log('✅ Connected to Redis');
         this.isConnected = true;
+        this.consecutiveFailures = 0;
+        this.circuitBreakerOpen = false;
+        setCircuitBreaker(false);
+        setRedisUp(true);
       });
 
       this.client.on('error', (error) => {
         console.error('❌ Redis connection error:', error);
         this.isConnected = false;
+        this.registerFailure('error');
       });
 
       this.client.on('close', () => {
         console.log('📡 Redis connection closed');
         this.isConnected = false;
+        this.registerFailure('close');
       });
 
       this.setupLuaScripts();
     } else {
-      console.log('⚠️  Redis client disabled - using in-memory fallback');
+  console.log('⚠️  Redis client disabled - using in-memory fallback');
+  setRedisUp(false);
     }
   }
 
   private isRedisAvailable(): boolean {
-    return this.isEnabled && this.client !== null && this.isConnected;
+    if (!this.isEnabled) return false;
+    // Circuit breaker logic: if open, check if reset window passed
+    if (this.circuitBreakerOpen) {
+      if (Date.now() - this.lastFailureTime > this.circuitBreakerResetAfterMs) {
+        this.circuitBreakerOpen = false;
+        setCircuitBreaker(false);
+        this.consecutiveFailures = 0;
+      } else {
+        return false;
+      }
+    }
+    return this.client !== null && this.isConnected;
   }
 
   private async executeRedisOperation<T>(operation: () => Promise<T>, fallback: T): Promise<T> {
     if (!this.isRedisAvailable()) {
+      redisFallbackTotal.inc({ reason: this.circuitBreakerOpen ? 'circuit_open' : 'unavailable' });
+      setRedisUp(false);
       return fallback;
     }
-    
+
     try {
-      return await operation();
+      const result = await operation();
+      // Success resets failure count
+      this.consecutiveFailures = 0;
+      setRedisUp(true);
+      return result;
     } catch (error) {
       console.error('Redis operation failed:', error);
+      this.registerFailure('op_error');
+      redisFallbackTotal.inc({ reason: 'operation_error' });
+      setRedisUp(false);
       return fallback;
+    }
+  }
+
+  private registerFailure(reason: string) {
+    this.lastFailureTime = Date.now();
+    this.consecutiveFailures++;
+    if (this.consecutiveFailures >= this.circuitBreakerThreshold && !this.circuitBreakerOpen) {
+      this.circuitBreakerOpen = true;
+      setCircuitBreaker(true);
+      redisFallbackTotal.inc({ reason: 'circuit_open' });
     }
   }
 
@@ -137,7 +180,7 @@ export class RedisClient {
   }
 
   isHealthy(): boolean {
-    return this.isRedisAvailable();
+  return this.isRedisAvailable();
   }
 
   async tokenBucket(key: string, capacity: number, tokens: number, intervalMs: number): Promise<{ allowed: boolean; remainingTokens: number }> {
