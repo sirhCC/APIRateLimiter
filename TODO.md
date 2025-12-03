@@ -10,13 +10,15 @@ This document outlines concrete action items to improve the API Rate Limiter pro
 ## 🔴 Critical Priority (Do First)
 
 ### Testing & Quality
-- [ ] **Increase test coverage from 20% to 70%+**
-  - [ ] Add integration tests for all rate limiting algorithms
-  - [ ] Add tests for Redis failure scenarios and circuit breaker
-  - [ ] Add tests for JWT and API key middleware edge cases
+- [x] **Increase test coverage from 20% to 70%+** (In Progress - 43.8% current)
+  - [x] Add integration tests for all rate limiting algorithms (Created, needs Redis)
+  - [x] Add tests for Redis failure scenarios and circuit breaker (Created, some failing)
+  - [x] Add tests for JWT and API key middleware edge cases (Created, async issues)
+  - [ ] Fix integration test failures (API key generation, Redis connection)
   - [ ] Add multi-node distributed rate limiting tests with docker-compose
   - [ ] Add tests for all validation schemas
   - **Effort**: 3-5 days | **Impact**: High | **Blocker for production**
+  - **Status**: 69 new tests added (12 failing), need Redis running for full validation
 
 - [ ] **Fix or remove half-implemented API key rotation feature**
   - [ ] Either complete rotation with `previousKeyHashes` grace period logic and tests
