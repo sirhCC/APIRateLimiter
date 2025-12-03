@@ -9,13 +9,13 @@
 ![Jest](https://img.shields.io/badge/Jest-C21325?style=for-the-badge&logo=jest&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 
-**🛡️ Enterprise-Grade API Protection**  
-*Production-ready rate limiting service with advanced security & comprehensive monitoring*
+**🛡️ Advanced Rate Limiting Service**  
+*Sophisticated rate limiting reference implementation with multiple algorithms & monitoring*
 
 [![Tests](https://img.shields.io/badge/Tests-73%2F73%20Passing-brightgreen)](./tests/)
 [![Coverage](https://img.shields.io/badge/Coverage-20.2%25-yellow)](./tests/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue)](./docker-compose.yml)
-[![Production](https://img.shields.io/badge/Production-Ready-success)](#-production-deployment)
+[![Status](https://img.shields.io/badge/Status-Development-orange)](#project-status)
 
 [🚀 Quick Start](#-quick-start) • [📖 API Reference](#-api-reference) • [🔐 Security](#-security-features) • [🛠️ Deployment](#-production-deployment) • [📊 Dashboard](#-dashboard--monitoring)
 
@@ -25,16 +25,16 @@
 
 ## 🎯 What is API Rate Limiter?
 
-The **API Rate Limiter** is a standalone, production-ready service that provides **rate limiting as a service** for any API. Built with Node.js, TypeScript, Express, and Redis, it offers enterprise-grade protection with multiple algorithms, comprehensive security features, and real-time monitoring.
+The **API Rate Limiter** is an advanced **reference implementation** and **learning project** that demonstrates production-grade rate limiting patterns. Built with Node.js, TypeScript, Express, and Redis, it showcases multiple algorithms, security best practices, and observability patterns. While architecturally sound and feature-rich, it requires additional hardening and testing before production deployment.
 
 ### 🌟 Key Features
 
-- **🔥 Multiple Algorithms**: Token Bucket, Sliding Window, Fixed Window
-- **🔐 Dual Authentication**: JWT tokens + multi-tier API key system  
-- **🛡️ Enterprise Security**: Cryptographic secrets, audit logging, IP filtering
-- **⚡ High Performance**: Redis Lua scripts, sub-millisecond response times
-- **📊 Real-time Monitoring**: Interactive dashboard with P50/P95/P99 metrics
-- **🐳 Production Ready**: Docker deployment with Redis cluster support
+- **🔥 Multiple Algorithms**: Token Bucket, Sliding Window, Fixed Window with atomic Lua scripts
+- **🔐 Dual Authentication**: JWT tokens + multi-tier API key system with usage tracking
+- **🛡️ Security Features**: Cryptographic secrets, audit logging, IP filtering, CORS configuration
+- **⚡ Performance Optimizations**: Redis Lua scripts, circuit breakers, LRU caches, circular buffers
+- **📊 Observability**: Prometheus metrics, structured logging, interactive dashboard, health checks
+- **🐳 Deployment Ready**: Docker configs, Kubernetes manifests, Redis fallback patterns
 
 ---
 
@@ -82,7 +82,38 @@ curl http://localhost:3000/health
 open http://localhost:3000/dashboard
 ```
 
-**🎉 That's it!** Your rate limiter is running and ready to protect APIs.
+**🎉 That's it!** Your rate limiter is running and ready for testing and development.
+
+---
+
+## 📊 Project Status
+
+### Current State
+**Status**: Active Development | **Use Case**: Learning, Reference, Development
+
+**What's Working Well:**
+- ✅ Core rate limiting algorithms (Token Bucket, Sliding Window, Fixed Window)
+- ✅ Redis integration with circuit breaker and fallback patterns
+- ✅ JWT and API key authentication with tier-based limiting
+- ✅ Prometheus metrics and structured logging
+- ✅ Interactive web dashboard
+- ✅ Docker and Kubernetes configurations
+- ✅ Comprehensive documentation
+
+**Known Limitations:**
+- ⚠️ Test coverage at 20% - core business logic needs more coverage
+- ⚠️ Distributed features not fully validated in multi-node scenarios
+- ⚠️ API key rotation feature partially implemented
+- ⚠️ No documented load testing results or performance baselines
+- ⚠️ Some console.log statements mixed with structured logging
+
+**Before Production Use:**
+- 🔧 Increase test coverage to 70%+ with integration tests
+- 🔧 Validate distributed rate limiting under network partitions
+- 🔧 Complete or remove partial features (key rotation)
+- 🔧 Establish performance baselines with load testing
+- 🔧 Standardize logging throughout codebase
+- 🔧 Security audit and penetration testing
 
 ---
 
@@ -404,10 +435,10 @@ npm run test:watch
 ```
 
 ### Test Results
-- **✅ 73/73 tests passing**
-- **📊 20.2% code coverage**
-- **🔬 Comprehensive integration tests**
-- **⚡ Performance benchmarks**
+- **✅ 73/73 unit tests passing**
+- **📊 20.2% code coverage** (needs improvement)
+- **🔬 Basic integration tests** (distributed scenarios need validation)
+- **⚡ Load test scripts available** (baseline results needed)
 
 ### Development Commands
 ```bash
@@ -567,41 +598,39 @@ app.use('/api/users', rateLimit(userAPILimits), (req, res) => {
 ## 📚 Additional Resources
 
 ### Documentation
-- [System Architecture](./docs/ARCHITECTURE.md) - Detailed system design
-- [Security Guide](./docs/SECURITY.md) - Comprehensive security documentation
-- [API Documentation](./docs/API.md) - Complete API reference
-- [Deployment Guide](./docs/DEPLOYMENT.md) - Production deployment strategies
+- [Redis Setup Guide](./docs/REDIS_SETUP.md) - Redis configuration
+- [Test Results](./docs/TEST_RESULTS.md) - Current test status
+- [Improvements Roadmap](./IMPROVEMENTS.md) - Planned enhancements and known issues
+- [Project Structure](./STRUCTURE.md) - Directory organization
 
-### Examples & Tutorials
-- [Integration Examples](./examples/) - Code examples for common use cases
-- [Docker Examples](./examples/docker/) - Docker deployment examples
-- [Kubernetes Examples](./examples/k8s/) - Kubernetes deployment manifests
-
-### Performance & Monitoring
-- [Performance Benchmarks](./docs/PERFORMANCE.md) - Detailed performance analysis
-- [Monitoring Setup](./docs/MONITORING.md) - Prometheus & Grafana integration
-- [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) - Common issues and solutions
+### Examples & Configuration
+- [Distributed Integration](./examples/distributed-integration.ts) - Distributed rate limiting example
+- [Kubernetes Manifests](./k8s/) - K8s deployment configs
+- [Docker Configs](./docker/) - Production and distributed Docker setups
+- [Environment Config](./.env.example) - Environment variable reference
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guide](./CONTRIBUTING.md) for details.
+Contributions are welcome! This is an educational project that benefits from community input.
 
 ### Development Workflow
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Add tests for new functionality
-5. Ensure all tests pass (`npm test`)
-6. Commit your changes (`git commit -m 'Add amazing feature'`)
-7. Push to the branch (`git push origin feature/amazing-feature`)
-8. Open a Pull Request
+2. Create a feature branch (`git checkout -b feature/your-feature`)
+3. Make your changes with appropriate tests
+4. Ensure tests pass (`npm test`)
+5. Update documentation as needed
+6. Submit a pull request with clear description
 
-### Reporting Issues
-- Use the [GitHub Issues](https://github.com/your-username/api-rate-limiter/issues) page
-- Include system information and steps to reproduce
-- Provide logs and error messages when applicable
+### Priority Areas for Contribution
+- Increasing test coverage (currently 20%)
+- Distributed rate limiting validation
+- Performance benchmarking and optimization
+- Documentation improvements
+- Security enhancements
+
+See [IMPROVEMENTS.md](./IMPROVEMENTS.md) for detailed roadmap and known issues.
 
 ---
 
@@ -613,21 +642,20 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙋‍♂️ Support
 
-- **📧 Email**: support@api-rate-limiter.com
-- **💬 Discord**: [Join our community](https://discord.gg/api-rate-limiter)
-- **📝 Documentation**: Comprehensive guides in this README
-- **🐛 Issues**: [GitHub Issues](https://github.com/your-username/api-rate-limiter/issues)
+- **📝 Documentation**: See this README and the `/docs` directory
+- **🐛 Issues**: Use GitHub Issues for bug reports and feature requests
+- **💡 Improvements**: Check [IMPROVEMENTS.md](./IMPROVEMENTS.md) for the development roadmap
 
 ---
 
 <div align="center">
 
-**🎉 Ready to protect your APIs with enterprise-grade rate limiting?**
+**📚 A reference implementation for learning advanced rate limiting patterns**
 
-[🚀 Get Started](#-quick-start) • [📖 Read the Docs](#-api-reference) • [🔐 Security Guide](#-security-features) • [🛠️ Deploy to Production](#-production-deployment)
+[🚀 Get Started](#-quick-start) • [📖 API Reference](#-api-reference) • [📊 Project Status](#-project-status) • [🔧 Improvements](./IMPROVEMENTS.md)
 
 ---
 
-*Built with ❤️ by the API Rate Limiter team*
+*An educational project demonstrating production-grade patterns and architecture*
 
 </div>
