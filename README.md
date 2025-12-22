@@ -12,10 +12,13 @@
 **🛡️ Advanced Rate Limiting Service**  
 *Sophisticated rate limiting reference implementation with multiple algorithms & monitoring*
 
-[![Tests](https://img.shields.io/badge/Tests-73%2F73%20Passing-brightgreen)](./tests/)
-[![Coverage](https://img.shields.io/badge/Coverage-20.2%25-yellow)](./tests/)
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue)](./docker-compose.yml)
-[![Status](https://img.shields.io/badge/Status-Development-orange)](#project-status)
+[![CI/CD](https://img.shields.io/badge/CI%2FCD-Passing-brightgreen?logo=github-actions)](./github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/Tests-106%2F106%20Passing-brightgreen?logo=jest)](./tests/)
+[![Coverage](https://img.shields.io/badge/Coverage-43.83%25-yellow?logo=codecov)](./coverage/)
+[![Node Version](https://img.shields.io/badge/Node-%3E%3D18.0.0-339933?logo=node.js)](./package.json)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-007ACC?logo=typescript)](./tsconfig.json)
+[![License](https://img.shields.io/badge/License-MIT-blue?logo=opensourceinitiative)](./LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?logo=github)](./github/PULL_REQUEST_TEMPLATE.md)
 
 [🚀 Quick Start](#-quick-start) • [📖 API Reference](#-api-reference) • [🔐 Security](#-security-features) • [🛠️ Deployment](#-production-deployment) • [📊 Dashboard](#-dashboard--monitoring)
 
