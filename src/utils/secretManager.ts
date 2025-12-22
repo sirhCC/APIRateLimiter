@@ -265,7 +265,7 @@ export function validateSecurityOnStartup(): void {
     audit.issues.forEach(issue => {
       log.system(`Security issue: ${issue.variable} - ${issue.issue}`, {
         severity: issue.severity,
-        metadata: { variable: issue.variable, recommendation: issue.recommendation }
+        metadata: { variable: issue.variable }
       });
     });
     
