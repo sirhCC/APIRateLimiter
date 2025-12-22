@@ -14,6 +14,7 @@ import { setupCors, getCorsInfo, createCorsConfig } from './utils/corsConfig';
 import { createApiKeyMiddleware, requireApiKey } from './middleware/apiKeyAuth';
 import { createJWTAuthMiddleware, requireRole, requirePermission, requireJWT } from './middleware/jwtAuth';
 import { createRateLimitMiddleware, createResetEndpoint, createAutoSensitiveRateLimiter, createSensitiveEndpointLogger } from './middleware';
+import { createSensitiveEndpointLimiter } from './middleware/sensitiveEndpointLimiter';
 import { createIPFilterMiddleware } from './middleware/ipFilter';
 import { createRateLimitLogger } from './middleware/logger';
 import { createOptimizedRateLimiter, RateLimitPresets } from './middleware/optimizedRateLimiter';
@@ -110,6 +111,11 @@ const stats = new SimpleStats();
 
 // Initialize API key manager
 const apiKeyManager = initializeApiKeyManager(redis);
+
+// Create rate limiters for sensitive endpoints
+const authRateLimiter = createSensitiveEndpointLimiter(redis, 'auth');
+const criticalRateLimiter = createSensitiveEndpointLimiter(redis, 'critical');
+const managementRateLimiter = createSensitiveEndpointLimiter(redis, 'management');
 
 // Trust proxy (for accurate IP addresses)
 app.set('trust proxy', process.env.ENABLE_TRUST_PROXY === 'true');
@@ -508,7 +514,7 @@ app.post('/reset/:key', validateApiKeyEndpoint(undefined, undefined, ResetParams
 // JWT Authentication Endpoints
 
 // Generate JWT token (demo endpoint)
-app.post('/auth/login', validateJwtEndpoint(LoginRequestSchema, LoginResponseSchema), async (req: Request, res: Response): Promise<void> => {
+app.post('/auth/login', authRateLimiter, validateJwtEndpoint(LoginRequestSchema, LoginResponseSchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const { email, password, role = 'user' } = req.body;
     
@@ -944,7 +950,7 @@ app.get('/api-keys/tiers', validateSystemEndpoint(undefined, ApiKeyTiersResponse
 });
 
 // Generate new API key
-app.post('/api-keys', validateApiKeyEndpoint(CreateApiKeyRequestSchema, undefined, undefined, ApiKeyResponseSchema), async (req: Request, res: Response): Promise<void> => {
+app.post('/api-keys', managementRateLimiter, validateApiKeyEndpoint(CreateApiKeyRequestSchema, undefined, undefined, ApiKeyResponseSchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const { name, tier = 'free', userId, organizationId, metadata } = req.body;
 
@@ -1036,7 +1042,7 @@ app.get('/api-keys/:keyId', validateApiKeyEndpoint(undefined, undefined, ApiKeyP
 });
 
 // Revoke API key
-app.delete('/api-keys/:keyId', validateApiKeyEndpoint(undefined, undefined, ApiKeyParamsSchema, undefined), async (req: Request, res: Response): Promise<void> => {
+app.delete('/api-keys/:keyId', criticalRateLimiter, validateApiKeyEndpoint(undefined, undefined, ApiKeyParamsSchema, undefined), async (req: Request, res: Response): Promise<void> => {
   try {
     const paramsData = (req as any).validatedParams || req.params;
     const { keyId } = paramsData;
@@ -1070,7 +1076,7 @@ app.delete('/api-keys/:keyId', validateApiKeyEndpoint(undefined, undefined, ApiK
 });
 
 // Rotate API key (graceful rotation with gracePeriodMs optional body param)
-app.post('/api-keys/:keyId/rotate', validateApiKeyEndpoint(undefined, undefined, ApiKeyParamsSchema, undefined), async (req: Request, res: Response): Promise<void> => {
+app.post('/api-keys/:keyId/rotate', managementRateLimiter, validateApiKeyEndpoint(undefined, undefined, ApiKeyParamsSchema, undefined), async (req: Request, res: Response): Promise<void> => {
   try {
     const paramsData = (req as any).validatedParams || req.params;
     const { keyId } = paramsData;
