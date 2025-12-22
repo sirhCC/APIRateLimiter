@@ -1,6 +1,7 @@
 import Redis from 'ioredis';
 import { inMemoryRateLimit } from './inMemoryRateLimit';
 import { redisFallbackTotal, setRedisUp, setCircuitBreaker } from './metrics';
+import { log } from './logger';
 
 /**
  * High-performance Redis client with connection pooling and Lua scripts
@@ -40,7 +41,11 @@ export class RedisClient {
       });
 
       this.client.on('connect', () => {
-        console.log('✅ Connected to Redis');
+        log.redis('Connected to Redis', {
+          host: config.host,
+          port: config.port,
+          metadata: { db: config.db || 0 }
+        });
         this.isConnected = true;
         this.consecutiveFailures = 0;
         this.circuitBreakerOpen = false;
@@ -49,21 +54,24 @@ export class RedisClient {
       });
 
       this.client.on('error', (error) => {
-        console.error('❌ Redis connection error:', error);
+        log.system('Redis connection error', {
+          error: error instanceof Error ? error.message : String(error),
+          severity: 'high' as const
+        });
         this.isConnected = false;
         this.registerFailure('error');
       });
 
       this.client.on('close', () => {
-        console.log('📡 Redis connection closed');
+        log.redis('Redis connection closed', {});
         this.isConnected = false;
         this.registerFailure('close');
       });
 
       this.setupLuaScripts();
     } else {
-  console.log('⚠️  Redis client disabled - using in-memory fallback');
-  setRedisUp(false);
+      log.redis('Redis client disabled - using in-memory fallback', {});
+      setRedisUp(false);
     }
   }
 
@@ -96,7 +104,10 @@ export class RedisClient {
       setRedisUp(true);
       return result;
     } catch (error) {
-      console.error('Redis operation failed:', error);
+      log.system('Redis operation failed', {
+        error: error instanceof Error ? error.message : String(error),
+        severity: 'medium' as const
+      });
       this.registerFailure('op_error');
       redisFallbackTotal.inc({ reason: 'operation_error' });
       setRedisUp(false);
@@ -375,7 +386,10 @@ export class RedisClient {
       } catch (error) {
         // Ignore disconnect errors in test environment
         if (process.env.NODE_ENV !== 'test') {
-          console.error('Redis disconnect error:', error);
+          log.system('Redis disconnect error', {
+            error: error instanceof Error ? error.message : String(error),
+            severity: 'low' as const
+          });
         }
       }
     }
