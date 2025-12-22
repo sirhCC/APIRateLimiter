@@ -1,6 +1,7 @@
 import { randomBytes, createHash } from 'crypto';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
+import { log } from './logger';
 
 /**
  * Secure Secret Management Utility
@@ -251,35 +252,45 @@ export class SecretManager {
  * Startup security validation
  */
 export function validateSecurityOnStartup(): void {
-  console.log('🔒 Running security validation...');
+  log.system('Running security validation');
   
   const audit = SecretManager.auditEnvironment();
   
   if (!audit.secure) {
-    console.error('❌ Security validation failed:');
+    log.system('Security validation failed', {
+      severity: 'high' as const,
+      metadata: { issueCount: audit.issues.length }
+    });
+    
     audit.issues.forEach(issue => {
-      const icon = {
-        critical: '🔴',
-        high: '🟠',
-        medium: '🟡',
-        low: '🔵',
-      }[issue.severity];
-      
-      console.error(`   ${icon} ${issue.variable}: ${issue.issue}`);
+      log.system(`Security issue: ${issue.variable} - ${issue.issue}`, {
+        severity: issue.severity,
+        metadata: { variable: issue.variable, recommendation: issue.recommendation }
+      });
     });
     
     const criticalIssues = audit.issues.filter(i => i.severity === 'critical');
     const isProduction = process.env.NODE_ENV === 'production';
     
     if (criticalIssues.length > 0 && isProduction) {
-      console.error('\n💥 Critical security issues found. Application cannot start in production.');
-      console.error('Run "npm run security:fix" to automatically fix these issues.');
+      log.system('Critical security issues found. Application cannot start in production.', {
+        severity: 'critical' as const,
+        metadata: { criticalIssueCount: criticalIssues.length }
+      });
+      log.system('Run "npm run security:fix" to automatically fix these issues.', {
+        severity: 'critical' as const
+      });
       process.exit(1);
     } else if (criticalIssues.length > 0) {
-      console.warn('\n⚠️  Security issues found but allowing startup in development/demo mode.');
-      console.warn('For production, run "npm run security:fix" to automatically fix these issues.');
+      log.system('Security issues found but allowing startup in development/demo mode.', {
+        severity: 'medium' as const,
+        metadata: { criticalIssueCount: criticalIssues.length }
+      });
+      log.system('For production, run "npm run security:fix" to automatically fix these issues.', {
+        severity: 'medium' as const
+      });
     }
   } else {
-    console.log('✅ Security validation passed');
+    log.system('Security validation passed');
   }
 }
