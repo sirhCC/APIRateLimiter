@@ -60,6 +60,18 @@ export function createApiKeyMiddleware(options: ApiKeyMiddlewareOptions) {
         return next();
       }
 
+      // Basic sanitization - prevent header injection attacks
+      if (apiKey.includes('\r') || apiKey.includes('\n') || apiKey.length > 256) {
+        if (required) {
+          res.status(400).json({
+            error: 'Invalid API key format',
+            message: 'API key contains invalid characters',
+          });
+          return;
+        }
+        return next();
+      }
+
       // Validate API key
       const keyMetadata = await apiKeyManager.validateApiKey(apiKey);
       
@@ -105,10 +117,10 @@ export function createApiKeyMiddleware(options: ApiKeyMiddlewareOptions) {
       req.apiKey = keyMetadata;
       req.isApiKeyAuthenticated = true;
 
-      // Add API key headers
+      // Add API key headers (sanitized to prevent header injection)
       res.set({
-        'X-API-Key-Tier': keyMetadata.tier,
-        'X-API-Key-Name': keyMetadata.name,
+        'X-API-Key-Tier': keyMetadata.tier.replace(/[\r\n]/g, ''),
+        'X-API-Key-Name': keyMetadata.name.replace(/[\r\n]/g, '').substring(0, 100),
       });
 
       // Record usage (async, don't wait)
@@ -137,6 +149,7 @@ export function createApiKeyMiddleware(options: ApiKeyMiddlewareOptions) {
         res.status(500).json({
           error: 'Authentication service error',
           message: 'Unable to validate API key at this time',
+          ...(process.env.NODE_ENV === 'development' && { details: error instanceof Error ? error.message : String(error) })
         });
         return;
       }
