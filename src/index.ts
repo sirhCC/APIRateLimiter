@@ -768,26 +768,38 @@ app.get('/performance', validateSystemEndpoint(undefined, PerformanceResponseSch
   }
 });
 
-// TODO: Fix endpoint-specific performance stats route
-// app.get('/performance/endpoint/*', (req, res) => {
-//   try {
-//     const endpoint = (req.params as any)[0]; // Get everything after /performance/endpoint/
-//     const endpointStats = performanceMonitor.getEndpointStats(decodeURIComponent(endpoint));
+// Endpoint-specific performance statistics
+app.get('/performance/endpoint/:endpointPath(*)', (req, res) => {
+  try {
+    const endpoint = decodeURIComponent(req.params.endpointPath);
+    const endpointStats = performanceMonitor.getEndpointStats(endpoint);
     
-//     if (!endpointStats) {
-//       return res.status(404).json({ error: 'No performance data found for this endpoint' });
-//     }
+    if (!endpointStats) {
+      return res.status(404).json({ 
+        error: 'No performance data found for this endpoint',
+        endpoint,
+        timestamp: new Date().toISOString(),
+        path: req.path,
+        statusCode: 404,
+      });
+    }
 
-//     return res.json({
-//       message: `Performance statistics for ${endpoint}`,
-//       timestamp: new Date().toISOString(),
-//       endpoint,
-//       stats: endpointStats,
-//     });
-//   } catch (error) {
-//     return res.status(500).json({ error: 'Failed to get endpoint performance stats' });
-//   }
-// });
+    return res.json({
+      message: `Performance statistics for ${endpoint}`,
+      timestamp: new Date().toISOString(),
+      endpoint,
+      stats: endpointStats,
+    });
+  } catch (error) {
+    return res.status(500).json({ 
+      error: 'Failed to get endpoint performance stats',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+      path: req.path,
+      statusCode: 500,
+    });
+  }
+});
 
 // Export all performance metrics
 app.get('/metrics/export', (req, res) => {
