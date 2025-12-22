@@ -1,5 +1,5 @@
 import { RedisClient } from './redis';
-import { createHash, randomBytes } from 'crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { log } from './logger';
 
 export interface ApiKeyTier {
@@ -147,6 +147,13 @@ export class ApiKeyManager {
       await this.addKeyToUser(userId, keyId);
     }
 
+    log.security('API key generated', {
+      eventType: 'auth_success',
+      severity: 'low',
+      keyId,
+      metadata: { tier, userId, name }
+    });
+
     return { apiKey, metadata: keyMetadata };
   }
 
@@ -154,6 +161,7 @@ export class ApiKeyManager {
    * Validate an API key and return metadata
    */
   async validateApiKey(apiKey: string): Promise<ApiKeyMetadata | null> {
+    const startTime = Date.now();
     try {
       const keyHash = this.hashKey(apiKey);
       const keyId = this.extractKeyId(apiKey);
@@ -161,10 +169,16 @@ export class ApiKeyManager {
       const metadata = await this._getKeyMetadata(keyId);
       
       if (!metadata || !metadata.isActive) {
+        log.security('API key validation failed - key not found or inactive', {
+          eventType: 'auth_failure',
+          severity: 'medium',
+          keyId,
+          metadata: { reason: !metadata ? 'not_found' : 'inactive', duration: Date.now() - startTime }
+        });
         return null;
       }
 
-      let match = metadata.key === keyHash;
+      let match = this.timingSafeCompare(metadata.key, keyHash);
 
       // If no primary match, attempt previous (rotation grace) matches
       if (!match && metadata.previousKeyHashes && metadata.previousKeyHashes.length > 0) {
@@ -175,9 +189,23 @@ export class ApiKeyManager {
         if (metadata.previousKeyHashes.length !== beforeLen) {
           await this.updateKeyMetadata(metadata); // persist pruning
         }
-        match = metadata.previousKeyHashes.some(p => p.hash === keyHash);
-        if (!match) return null; // not matched anywhere
+        match = metadata.previousKeyHashes.some(p => this.timingSafeCompare(p.hash, keyHash));
+        if (!match) {
+          log.security('API key validation failed - hash mismatch', {
+            eventType: 'auth_failure',
+            severity: 'high',
+            keyId,
+            metadata: { reason: 'invalid_key', duration: Date.now() - startTime }
+          });
+          return null;
+        }
       } else if (!match) {
+        log.security('API key validation failed - hash mismatch', {
+          eventType: 'auth_failure',
+          severity: 'high',
+          keyId,
+          metadata: { reason: 'invalid_key', duration: Date.now() - startTime }
+        });
         return null;
       }
 
@@ -185,12 +213,20 @@ export class ApiKeyManager {
       metadata.lastUsed = Date.now();
       await this.updateKeyMetadata(metadata);
 
+      log.security('API key validated successfully', {
+        eventType: 'api_key_validated',
+        severity: 'low',
+        keyId,
+        metadata: { tier: metadata.tier, userId: metadata.userId, duration: Date.now() - startTime }
+      });
+
       return metadata;
     } catch (error) {
       log.security('API key validation error', {
         eventType: 'auth_failure',
         severity: 'high',
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
+        metadata: { duration: Date.now() - startTime }
       });
       return null;
     }
@@ -210,6 +246,14 @@ export class ApiKeyManager {
     const now = Date.now();
     const expiresAt = now + gracePeriodMs;
     if (!metadata.previousKeyHashes) metadata.previousKeyHashes = [];
+
+
+    log.security('API key rotated', {
+      eventType: 'auth_success',
+      severity: 'low',
+      keyId,
+      metadata: { gracePeriodMs, userId: metadata.userId }
+    });
 
     // Append current active key hash to previous list with expiry
     metadata.previousKeyHashes.push({ hash: metadata.key, expiresAt });
@@ -304,6 +348,13 @@ export class ApiKeyManager {
       metadata.isActive = false;
       await this.updateKeyMetadata(metadata);
 
+      log.security('API key revoked', {
+        eventType: 'auth_success',
+        severity: 'medium',
+        keyId,
+        metadata: { userId: metadata.userId, tier: metadata.tier }
+      });
+
       return true;
     } catch (error) {
       log.security('Error revoking API key', {
@@ -353,6 +404,23 @@ export class ApiKeyManager {
 
   private generateKeyId(): string {
     return randomBytes(8).toString('hex');
+  }
+
+  /**
+   * Timing-safe string comparison to prevent timing attacks
+   */
+  private timingSafeCompare(a: string, b: string): boolean {
+    try {
+      // Ensure equal length by hashing both if needed
+      if (a.length !== b.length) {
+        return false;
+      }
+      const bufA = Buffer.from(a, 'hex');
+      const bufB = Buffer.from(b, 'hex');
+      return timingSafeEqual(bufA, bufB);
+    } catch {
+      return false;
+    }
   }
 
   private generateSecureKey(keyId: string): string {
