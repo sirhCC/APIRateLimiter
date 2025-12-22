@@ -104,6 +104,18 @@ export function createJWTAuthMiddleware(options: JWTAuthOptions) {
         return next();
       }
 
+      // Validate token length to prevent DoS (JWT should be reasonable length)
+      if (token.length > 8192) {
+        if (required) {
+          res.status(400).json({
+            error: 'Invalid token',
+            message: 'Token exceeds maximum length',
+          });
+          return;
+        }
+        return next();
+      }
+
       // Verify and decode token
       const decoded = jwt.verify(token, secret, { algorithms }) as JWTUserData & { [key: string]: any };
       
@@ -144,11 +156,18 @@ export function createJWTAuthMiddleware(options: JWTAuthOptions) {
           return;
         }
         
+        const errorMessage = error.message === 'jwt expired' 
+          ? 'Token has expired'
+          : error.message === 'jwt malformed'
+          ? 'Invalid token format'
+          : error.message === 'invalid signature'
+          ? 'Invalid token signature'
+          : 'Invalid or malformed JWT token';
+        
         res.status(401).json({
           error: 'Invalid token',
-          message: error.message === 'jwt expired' 
-            ? 'Token has expired' 
-            : 'Invalid or malformed JWT token',
+          message: errorMessage,
+          ...(process.env.NODE_ENV === 'development' && { details: error.message })
         });
         return;
       }
