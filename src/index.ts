@@ -768,10 +768,20 @@ app.get('/performance', validateSystemEndpoint(undefined, PerformanceResponseSch
   }
 });
 
-// Endpoint-specific performance statistics
-app.get('/performance/endpoint/:endpointPath(*)', (req, res) => {
+// Endpoint-specific performance statistics (use regex for dynamic paths)
+app.get(/^\/performance\/endpoint\/(.+)$/, (req, res) => {
   try {
-    const endpoint = decodeURIComponent(req.params.endpointPath);
+    // Get the captured path from regex match
+    const endpoint = decodeURIComponent(req.params[0] || '');
+    if (!endpoint) {
+      return res.status(400).json({ 
+        error: 'Endpoint path is required',
+        timestamp: new Date().toISOString(),
+        path: req.path,
+        statusCode: 400,
+      });
+    }
+    
     const endpointStats = performanceMonitor.getEndpointStats(endpoint);
     
     if (!endpointStats) {
