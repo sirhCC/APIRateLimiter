@@ -28,6 +28,7 @@ describe('Configuration hash endpoint', () => {
   it('defaults demo features off in production', () => {
     process.env.NODE_ENV = 'production';
     process.env.JWT_SECRET = SECURE_PROD_JWT_SECRET;
+    process.env.CORS_ORIGIN = 'https://api.example.com';
     delete process.env.DEMO_USERS_ENABLED;
     delete process.env.DEMO_ENDPOINTS_ENABLED;
 
@@ -35,5 +36,39 @@ describe('Configuration hash endpoint', () => {
 
     expect(cfg.security.demoUsersEnabled).toBe(false);
     expect(cfg.security.demoEndpointsEnabled).toBe(false);
+  });
+
+  it('requires JWT_SECRET in production', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.CORS_ORIGIN = 'https://api.example.com';
+    delete process.env.JWT_SECRET;
+
+    expect(() => loadConfig()).toThrow('JWT_SECRET is required in production');
+  });
+
+  it('requires explicit CORS_ORIGIN in production', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.JWT_SECRET = SECURE_PROD_JWT_SECRET;
+    delete process.env.CORS_ORIGIN;
+
+    expect(() => loadConfig()).toThrow('CORS_ORIGIN must be explicitly configured in production');
+  });
+
+  it('rejects weak JWT secrets in production', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.JWT_SECRET = 'test-jwt-secret-do-not-use-in-production';
+    process.env.CORS_ORIGIN = 'https://api.example.com';
+
+    expect(() => loadConfig()).toThrow('JWT_SECRET is insecure for production');
+  });
+
+  it('requires REDIS_PASSWORD when Redis is enabled in production', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.JWT_SECRET = SECURE_PROD_JWT_SECRET;
+    process.env.CORS_ORIGIN = 'https://api.example.com';
+    process.env.REDIS_ENABLED = 'true';
+    delete process.env.REDIS_PASSWORD;
+
+    expect(() => loadConfig()).toThrow('REDIS_PASSWORD is required when Redis is enabled in production');
   });
 });
