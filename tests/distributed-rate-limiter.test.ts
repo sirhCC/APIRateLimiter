@@ -569,10 +569,6 @@ describe('Distributed Setup Utilities', () => {
   });
   
   test('should setup distributed rate limiter with quick setup', async () => {
-    if (!redisAvailable) {
-      return;
-    }
-
     // This test may fail without proper Redis setup, but should not throw
     try {
       const result = await quickSetupDistributed(mockApp, {
