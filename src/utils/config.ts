@@ -2,6 +2,9 @@ import crypto from 'crypto';
 import { z } from 'zod';
 import { RateLimitRule, ApiRateLimiterConfig } from '../types';
 import { log } from './logger';
+import { SecretManager } from './secretManager';
+
+const DEVELOPMENT_JWT_FALLBACK = 'fallback-demo-secret-change-in-production';
 
 // Zod schema for environment-driven configuration
 const EnvSchema = z.object({
@@ -42,9 +45,47 @@ function parseRules(json?: string): RateLimitRule[] {
   }
 }
 
+function resolveJwtSecret(parsed: LoadedEnv): string {
+  const providedSecret = parsed.JWT_SECRET?.trim();
+
+  if (providedSecret) {
+    if (parsed.NODE_ENV === 'production') {
+      const validation = SecretManager.validateSecret(providedSecret);
+      if (!validation.isValid) {
+        throw new Error(`JWT_SECRET is insecure for production: ${validation.issues.join(', ')}`);
+      }
+    }
+
+    return providedSecret;
+  }
+
+  if (parsed.NODE_ENV === 'production') {
+    throw new Error('JWT_SECRET is required in production');
+  }
+
+  return DEVELOPMENT_JWT_FALLBACK;
+}
+
+function validateProductionSecurity(parsed: LoadedEnv): void {
+  if (parsed.NODE_ENV !== 'production') {
+    return;
+  }
+
+  if (parsed.CORS_ORIGIN === 'development-default') {
+    throw new Error('CORS_ORIGIN must be explicitly configured in production');
+  }
+
+  if (parsed.REDIS_ENABLED === 'true' && !process.env.REDIS_PASSWORD?.trim()) {
+    throw new Error('REDIS_PASSWORD is required when Redis is enabled in production');
+  }
+}
+
 export function loadConfig(): ApiRateLimiterConfig {
   const parsed = EnvSchema.parse(process.env);
   const demoFeaturesEnabledByDefault = parsed.NODE_ENV === 'development' || parsed.NODE_ENV === 'test';
+  const jwtSecret = resolveJwtSecret(parsed);
+
+  validateProductionSecurity(parsed);
 
   const rules = parseRules(parsed.RATE_LIMIT_RULES);
 
@@ -71,7 +112,7 @@ export function loadConfig(): ApiRateLimiterConfig {
       statsRetentionMs: parseInt(parsed.STATS_RETENTION_MS, 10),
     },
     security: {
-      jwtSecret: parsed.JWT_SECRET || 'fallback-demo-secret-change-in-production',
+      jwtSecret,
       jwtExpiresIn: parsed.JWT_EXPIRES_IN,
       jwtAlgorithm: parsed.JWT_ALGORITHM,
       demoUsersEnabled: parsed.DEMO_USERS_ENABLED ? parsed.DEMO_USERS_ENABLED === 'true' : demoFeaturesEnabledByDefault,
