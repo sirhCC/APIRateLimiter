@@ -310,9 +310,11 @@ export class DistributedRedisClient {
     
     this.cluster = new Redis.Cluster(this.config.cluster.nodes, {
       enableOfflineQueue: false,
+      clusterRetryStrategy: () => null,
       redisOptions: {
         lazyConnect: true,
         connectTimeout: 10000,
+        enableOfflineQueue: false,
         ...this.config.cluster.options?.redisOptions
       },
       maxRetriesPerRequest: 3,
@@ -367,8 +369,10 @@ export class DistributedRedisClient {
       password: this.config.single.password,
       db: this.config.single.db || 0,
       lazyConnect: true,
+      enableOfflineQueue: false,
       connectTimeout: 10000,
-      maxRetriesPerRequest: 3
+      maxRetriesPerRequest: 3,
+      retryStrategy: () => null
     });
     
     this.single.on('connect', () => {
