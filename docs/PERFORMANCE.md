@@ -1,13 +1,59 @@
 # Performance Baseline Results
 
-**Date**: December 21, 2025  
-**Environment**: Windows, Node.js v18+, In-Memory Rate Limiting (Redis disabled)  
-**Test Tool**: k6 v1.4.2  
+**Date**: March 25, 2026  
+**Environment**: Windows, Node.js v18+, typically in-memory rate limiting unless Redis is explicitly enabled  
+**Test Tool**: k6  
 **Server**: Express.js 5.x with TypeScript
+
+## Repeatable benchmark workflow
+
+This project now has three repeatable load profiles:
+
+- `npm run test:load:smoke`
+- `npm run test:load:baseline`
+- `npm run test:load:stress`
+
+Each run writes a JSON summary to the workspace root:
+
+- `k6-summary-smoke.json`
+- `k6-summary-baseline.json`
+- `k6-summary-stress.json`
+
+You can override the target URL:
+
+```powershell
+$env:BASE_URL='http://localhost:3000'; npm run test:load:baseline
+```
+
+Or choose a custom summary path:
+
+```powershell
+$env:K6_SUMMARY_PATH='artifacts\baseline.json'; npm run test:load:baseline
+```
+
+## Standard load profiles
+
+### Smoke
+
+- fast verification run for local changes
+- target: 5-10 VUs
+- primary goal: confirm routes and headers behave correctly under light load
+
+### Baseline
+
+- default repeatable benchmark for comparison over time
+- target: 20 → 50 → 100 → 200 VUs
+- primary goal: establish P95/P99 latency and failure-rate trends
+
+### Stress
+
+- higher-pressure run for degradation analysis
+- target: 50 → 150 → 300 → 500 VUs
+- primary goal: identify where latency and failure rates begin to spike
 
 ## Test Configuration
 
-- **Load Pattern**: Gradual ramp-up over 6 minutes
+- **Baseline profile**: Gradual ramp-up over 6 minutes
   - 0-30s: Ramp to 20 VUs
   - 30s-1m30s: Stay at 50 VUs
   - 1m30s-2m: Ramp to 100 VUs
@@ -32,14 +78,25 @@
 
 ### Test Run 1: In-Memory Rate Limiting (Baseline)
 
-**Status**: ⏳ Pending - Unable to complete due to terminal interference  
-**Note**: k6 load test script exists at `tests/load-test.js` but execution environment requires isolation to avoid SIGINT conflicts.
+**Status**: Ready to run repeatably  
+**Command**: `npm run test:load:baseline`
+
+### Test Run 2: Smoke verification
+
+**Status**: Ready to run repeatably  
+**Command**: `npm run test:load:smoke`
+
+### Test Run 3: Stress profile
+
+**Status**: Ready to run repeatably  
+**Command**: `npm run test:load:stress`
 
 ### Expected Performance Characteristics
 
 Based on similar Express.js applications with in-memory rate limiting:
 
 **Low Load (20-50 concurrent users)**:
+
 - P50 latency: ~10-20ms
 - P95 latency: ~50-100ms  
 - P99 latency: ~150-200ms
@@ -47,6 +104,7 @@ Based on similar Express.js applications with in-memory rate limiting:
 - Error rate: <0.1%
 
 **Medium Load (100 concurrent users)**:
+
 - P50 latency: ~20-40ms
 - P95 latency: ~100-200ms
 - P99 latency: ~300-500ms
@@ -54,6 +112,7 @@ Based on similar Express.js applications with in-memory rate limiting:
 - Error rate: <1%
 
 **Peak Load (200 concurrent users)**:
+
 - P50 latency: ~50-100ms
 - P95 latency: ~200-400ms
 - P99 latency: ~500-800ms
@@ -70,13 +129,15 @@ Based on similar Express.js applications with in-memory rate limiting:
 
 ## Bottlenecks Identified
 
-### Current Limitations:
+### Current Limitations
+
 - **In-Memory Rate Limiting**: Not suitable for multi-instance deployments
 - **Statistics Calculation**: O(n) operations on every `/stats` request (circular buffers help but still expensive)
 - **No Request Queuing**: Requests are rejected immediately when rate limit exceeded (no retry logic)
 - **Synchronous Middleware**: Rate limit checks block request processing
 
-### Recommended Next Steps:
+### Recommended Next Steps
+
 1. Enable Redis and re-run load tests for distributed comparison
 2. Implement response caching with 1-second TTL for analytics endpoints
 3. Add distributed tracing (OpenTelemetry) for request flow visibility
@@ -86,6 +147,7 @@ Based on similar Express.js applications with in-memory rate limiting:
 ## Manual Testing Results
 
 **Quick Smoke Test** (via curl):
+
 ```bash
 # Health check: ~5-15ms response time
 curl http://localhost:3000/health
@@ -97,15 +159,30 @@ curl http://localhost:3000/stats
 curl http://localhost:3000/performance
 ```
 
+## Operational targets
+
+Use these as initial working targets until real baseline files are captured and reviewed:
+
+- **Smoke**
+  - P95 < 300ms
+  - HTTP failure rate < 5%
+- **Baseline**
+  - P95 < 500ms
+  - HTTP failure rate < 10%
+- **Stress**
+  - P95 < 800ms
+  - HTTP failure rate < 15%
+
 ## Conclusion
 
-**Status**: Baseline not fully established due to k6 execution environment constraints.  
-**Recommendation**: Run k6 tests in isolated CI/CD environment or Docker container to avoid terminal interference.  
-**Alternative**: Use Apache Bench (ab) or wrk for simpler command-line load testing.
+**Status**: the benchmark workflow is now repeatable and scriptable.  
+**Recommendation**: check in or archive the generated k6 summary files for known-good runs, then compare future changes against those artifacts.  
+**Next step**: capture one smoke, one baseline, and one stress summary for the current branch and treat them as the first real benchmark set.
 
 ---
 
 **Next Steps**:
+
 1. Set up dedicated load testing environment (Docker or CI runner)
 2. Establish P50/P95/P99 baselines across all endpoints
 3. Compare in-memory vs Redis performance
