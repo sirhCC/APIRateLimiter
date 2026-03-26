@@ -27,7 +27,7 @@ import { getErrorMessage, sendError } from './utils/httpErrors';
 import { ERROR_CODES } from './utils/errorCodes';
 
 // Load environment variables
-config();
+config({ quiet: true });
 
 // Enhanced security validation
 validateSecurityOnStartup();
@@ -67,7 +67,9 @@ app.use(helmet({
 app.use(cors(corsOptions));
 app.use(cookieParser()); // Add cookie parser for JWT support
 app.use(performanceMonitor.middleware()); // Add performance monitoring
-app.use(morgan('combined'));
+if (process.env.NODE_ENV !== 'test') {
+  app.use(morgan('combined'));
+}
 app.use(express.json());
 
 
