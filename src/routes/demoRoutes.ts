@@ -1,15 +1,21 @@
 import { Express, Request, Response } from 'express';
+import { ApiRateLimiterConfig } from '../types';
 import { RedisClient } from '../utils/redis';
 import { SimpleStats } from '../utils/stats';
 import { createOptimizedRateLimiter, RateLimitPresets } from '../middleware/optimizedRateLimiter';
 
 export interface RegisterDemoRoutesOptions {
+  appConfig: ApiRateLimiterConfig;
   redis: RedisClient;
   stats: SimpleStats;
 }
 
 export function registerDemoRoutes(app: Express, options: RegisterDemoRoutesOptions): void {
-  const { redis, stats } = options;
+  const { appConfig, redis, stats } = options;
+
+  if (!appConfig.security.demoEndpointsEnabled) {
+    return;
+  }
 
   app.get('/test', (req: Request, res: Response) => {
     res.json({
