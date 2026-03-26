@@ -39,6 +39,7 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
   });
 
   registerDemoRoutes(app, {
+    appConfig: options.appConfig,
     redis: options.redis,
     stats: options.stats,
   });
