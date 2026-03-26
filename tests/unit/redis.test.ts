@@ -9,8 +9,9 @@ import { RedisClient } from '../../src/utils/redis';
 
 describe('Redis Utilities', () => {
   let testRedis: RedisClient;
-  let directRedis: Redis;
+  let directRedis: Redis | undefined;
   let redisAvailable = false;
+  const shouldUseRealRedis = process.env.RUN_REDIS_INTEGRATION === 'true';
 
   beforeAll(async () => {
     // Create a test Redis client
@@ -18,8 +19,13 @@ describe('Redis Utilities', () => {
       host: 'localhost',
       port: 6379,
       db: 15, // Use test database
-      enabled: true
+      enabled: shouldUseRealRedis
     });
+
+    if (!shouldUseRealRedis) {
+      redisAvailable = false;
+      return;
+    }
 
     // Create direct Redis client for test setup/cleanup
     directRedis = new Redis({
