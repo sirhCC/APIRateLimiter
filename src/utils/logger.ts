@@ -82,6 +82,7 @@ const prodFormat = winston.format.combine(
 );
 
 // Log level based on environment
+const isTestEnvironment = process.env.NODE_ENV === 'test';
 const logLevel = process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'info' : 'debug');
 
 // Create transports based on environment
@@ -91,6 +92,7 @@ const transports: winston.transport[] = [];
 transports.push(
   new winston.transports.Console({
     level: logLevel,
+    silent: isTestEnvironment || process.env.LOG_SILENT === 'true',
     format: process.env.NODE_ENV === 'production' ? prodFormat : devFormat,
   })
 );
