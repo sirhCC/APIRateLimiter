@@ -101,6 +101,11 @@ export const ApiKeyResponseSchema = z.object({
     organizationId: z.string().optional(),
     createdAt: z.string().optional(),
     expiresAt: z.string().optional(),
+    isActive: z.boolean(),
+    revokedAt: z.string().optional(),
+    revokedBy: z.string().optional(),
+    revocationReason: z.string().optional(),
+    lastRotatedAt: z.string().optional(),
     metadata: MetadataSchema,
   }),
 });
