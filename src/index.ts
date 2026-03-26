@@ -24,6 +24,7 @@ import { loadConfig } from './utils/config';
 import { registerCoreRoutes } from './routes/coreRoutes';
 import { registerApiKeyRoutes } from './routes/apiKeyRoutes';
 import { getErrorMessage, sendError } from './utils/httpErrors';
+import { ERROR_CODES } from './utils/errorCodes';
 
 // Load environment variables
 config();
@@ -366,7 +367,10 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
     req,
     500,
     'Internal Server Error',
-    process.env.NODE_ENV === 'development' ? getErrorMessage(err) : 'An unexpected error occurred'
+    process.env.NODE_ENV === 'development' ? getErrorMessage(err) : 'An unexpected error occurred',
+    {
+      code: ERROR_CODES.SYSTEM.INTERNAL_SERVER_ERROR,
+    }
   );
 });
 
