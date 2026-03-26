@@ -74,6 +74,16 @@ export interface ApiRateLimiterConfig {
     port: number;
     host: string;
   };
+  environment: {
+    name: string;
+    isDevelopment: boolean;
+    isTest: boolean;
+    isProduction: boolean;
+    trustProxy: boolean;
+    ipWhitelist: string[];
+    ipBlacklist: string[];
+    metricsEndpointEnabled: boolean;
+  };
   defaultRateLimit: RateLimitConfig;
   rules: RateLimitRule[];
   proxy?: ProxyConfig;
