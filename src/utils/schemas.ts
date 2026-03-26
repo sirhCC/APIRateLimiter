@@ -310,6 +310,7 @@ export const ConfigHashResponseSchema = z.object({
 // ================================
 
 export const ErrorResponseSchema = z.object({
+  code: z.string().optional(),
   error: z.string(),
   message: z.string(),
   details: z.array(z.object({
