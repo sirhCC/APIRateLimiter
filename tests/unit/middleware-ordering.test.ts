@@ -49,6 +49,7 @@ describe('Middleware ordering regressions', () => {
 
     const apiKeyResponse = await request(app)
       .post('/api-keys')
+      .set('Authorization', `Bearer ${loginResponse.body.token}`)
       .send({
         name: 'Ordering Premium Key',
         tier: 'premium',
