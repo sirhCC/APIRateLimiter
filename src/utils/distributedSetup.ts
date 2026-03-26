@@ -274,6 +274,10 @@ export async function setupDistributedRateLimiter(options: DistributedSetupOptio
       log.system('Shutting down distributed rate limiter', {
         metadata: { instanceId: redisConfig.instanceId }
       });
+
+      process.off('SIGTERM', shutdown);
+      process.off('SIGINT', shutdown);
+
       await limiter.shutdown();
     };
     
