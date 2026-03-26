@@ -251,6 +251,7 @@ export class DistributedRedisClient {
   private hashRing?: ConsistentHashRing;
   private config: DistributedRedisConfig;
   private connected = false;
+  private initializationPromise?: Promise<void>;
   
   constructor(config: DistributedRedisConfig) {
     this.config = config;
@@ -259,8 +260,18 @@ export class DistributedRedisClient {
       config.circuitBreaker?.successThreshold || 3,
       config.circuitBreaker?.timeout || 60000
     );
-    
-    this.initialize();
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (!this.initializationPromise) {
+      this.initializationPromise = this.initialize().catch((error) => {
+        this.connected = false;
+        this.initializationPromise = undefined;
+        throw error;
+      });
+    }
+
+    await this.initializationPromise;
   }
   
   private async initialize(): Promise<void> {
@@ -343,6 +354,8 @@ export class DistributedRedisClient {
         metadata: { node: nodeKey }
       });
     });
+
+    await this.cluster.connect();
   }
   
   private async initializeSingle(): Promise<void> {
@@ -371,6 +384,9 @@ export class DistributedRedisClient {
         severity: 'high' as const
       });
     });
+
+    await this.single.connect();
+    await this.single.ping();
   }
   
   /**
@@ -378,6 +394,8 @@ export class DistributedRedisClient {
    */
   async checkRateLimit(config: DistributedRateLimitConfig): Promise<DistributedRateLimitResult> {
     return this.circuitBreaker.execute(async () => {
+      await this.ensureInitialized();
+
       const shardKey = this.getShardKey(config.key);
       const redis = await this.getRedisClient(shardKey);
       
@@ -603,6 +621,8 @@ export class DistributedRedisClient {
     };
     
     try {
+      await this.ensureInitialized();
+
       if (this.cluster) {
         const nodes = this.cluster.nodes();
         health.nodeStats = {
@@ -618,6 +638,7 @@ export class DistributedRedisClient {
         };
       }
     } catch (error) {
+      health.connected = false;
       log.redis('Error getting cluster health', {
         error: error instanceof Error ? error.message : String(error),
         severity: 'medium' as const

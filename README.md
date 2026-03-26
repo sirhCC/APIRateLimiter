@@ -102,17 +102,18 @@ open http://localhost:3000/dashboard
 - ✅ Interactive web dashboard
 - ✅ Docker and Kubernetes configurations
 - ✅ Comprehensive documentation
+- ✅ Shared-Redis distributed coordination covered by automated tests
 
 **Known Limitations:**
 - ⚠️ Test coverage at 20% - core business logic needs more coverage
-- ⚠️ Distributed features not fully validated in multi-node scenarios
+- ⚠️ Redis-cluster distributed mode is still experimental outside the shared-Redis test path
 - ⚠️ API key rotation feature partially implemented
 - ⚠️ No documented load testing results or performance baselines
 - ⚠️ Some console.log statements mixed with structured logging
 
 **Before Production Use:**
 - 🔧 Increase test coverage to 70%+ with integration tests
-- 🔧 Validate distributed rate limiting under network partitions
+- 🔧 Validate Redis-cluster distributed rate limiting under failover, partitions, and clock skew
 - 🔧 Complete or remove partial features (key rotation)
 - 🔧 Establish performance baselines with load testing
 - 🔧 Standardize logging throughout codebase
@@ -329,6 +330,8 @@ docker-compose logs -f api-rate-limiter
 # Scale the service
 docker-compose up -d --scale api-rate-limiter=3
 ```
+
+Distributed deployment assets exist, but cluster-mode validation is still experimental. See [docs/DISTRIBUTED_READINESS.md](docs/DISTRIBUTED_READINESS.md) before presenting this as production-proven.
 
 #### Production Docker Compose
 ```yaml

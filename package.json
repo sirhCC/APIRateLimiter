@@ -16,6 +16,7 @@
     "test:unit:fast": "jest tests/unit/apiKeys.test.ts tests/unit/circuitBreaker.test.ts tests/unit/jwtAuth.test.ts tests/unit/metrics.test.ts tests/unit/middleware.test.ts tests/unit/redis.test.ts tests/unit/stats.test.ts",
     "test:unit:app": "jest tests/unit/api-key-route-auth.test.ts tests/unit/config.test.ts tests/unit/error-codes.test.ts tests/unit/middleware-ordering.test.ts tests/unit/readiness.test.ts tests/unit/route-modules.test.ts",
     "test:integration": "jest --testPathPatterns=integration --collectCoverage=false --passWithNoTests",
+    "test:distributed": "jest tests/distributed-rate-limiter.test.ts tests/integration/distributedMode.test.ts --collectCoverage=false --passWithNoTests",
     "test:e2e": "jest --testPathPatterns=e2e --collectCoverage=false --passWithNoTests",
     "test:manual": "node tests/test-setup.js",
     "test:setup": "cross-env echo \"Make sure Redis is running, then run 'npm run dev' in another terminal and 'npm test'\"",

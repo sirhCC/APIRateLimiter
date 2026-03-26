@@ -172,6 +172,7 @@ export class DistributedRateLimiter {
   private state: DistributedRateLimitState;
   private options: DistributedRateLimiterOptions;
   private instanceId: string;
+  private healthMonitor?: NodeJS.Timeout;
   
   constructor(options: DistributedRateLimiterOptions) {
     this.options = options;
@@ -450,7 +451,7 @@ export class DistributedRateLimiter {
   }
   
   private async startHealthMonitoring(): Promise<void> {
-    setInterval(async () => {
+    const updateHealth = async () => {
       try {
         const health = await this.redisClient.getClusterHealth();
         this.state.clusterHealth = {
@@ -470,6 +471,11 @@ export class DistributedRateLimiter {
           severity: 'medium' as const
         });
       }
+    };
+
+    await updateHealth();
+    this.healthMonitor = setInterval(() => {
+      void updateHealth();
     }, 30000); // Check every 30 seconds
   }
   
@@ -531,6 +537,11 @@ export class DistributedRateLimiter {
    */
   async shutdown(): Promise<void> {
     try {
+      if (this.healthMonitor) {
+        clearInterval(this.healthMonitor);
+        this.healthMonitor = undefined;
+      }
+
       if (this.fallbackLimiter) {
         this.fallbackLimiter.destroy();
       }
@@ -555,7 +566,7 @@ export class DistributedRateLimiter {
 export function createDistributedRateLimiter(options: DistributedRateLimiterOptions) {
   const limiter = new DistributedRateLimiter(options);
   return {
-    middleware: limiter.middleware.bind(limiter),
+    middleware: limiter.middleware(),
     getStats: limiter.getStats.bind(limiter),
     resetStats: limiter.resetStats.bind(limiter),
     shutdown: limiter.shutdown.bind(limiter)
