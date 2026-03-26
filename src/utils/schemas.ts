@@ -274,6 +274,7 @@ export const ConfigResponseSchema = z.object({
         environment: z.string(),
       }),
       demoUsersEnabled: z.boolean(),
+      demoEndpointsEnabled: z.boolean(),
     }),
     rateLimit: z.object({
       defaultAlgorithm: z.string(),
