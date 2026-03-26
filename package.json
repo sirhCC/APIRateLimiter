@@ -14,7 +14,7 @@
     "test:coverage": "jest --coverage --testPathPatterns=unit",
     "test:unit": "jest --testPathPatterns=unit",
     "test:unit:fast": "jest tests/unit/apiKeys.test.ts tests/unit/circuitBreaker.test.ts tests/unit/jwtAuth.test.ts tests/unit/metrics.test.ts tests/unit/middleware.test.ts tests/unit/redis.test.ts tests/unit/stats.test.ts",
-    "test:unit:app": "jest tests/unit/config.test.ts tests/unit/error-codes.test.ts tests/unit/readiness.test.ts tests/unit/route-modules.test.ts",
+    "test:unit:app": "jest tests/unit/config.test.ts tests/unit/error-codes.test.ts tests/unit/middleware-ordering.test.ts tests/unit/readiness.test.ts tests/unit/route-modules.test.ts",
     "test:integration": "jest --testPathPatterns=integration --collectCoverage=false --passWithNoTests",
     "test:e2e": "jest --testPathPatterns=e2e --collectCoverage=false --passWithNoTests",
     "test:manual": "node tests/test-setup.js",
