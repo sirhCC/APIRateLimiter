@@ -23,7 +23,12 @@ export interface ApiKeyMetadata {
   organizationId?: string;
   created: number;
   lastUsed?: number;
+  expiresAt?: number;
   isActive: boolean;
+  revokedAt?: number;
+  revokedBy?: string;
+  revocationReason?: string;
+  lastRotatedAt?: number;
   /**
    * Previous key hashes (for rotation) retained until expiresAt (epoch ms).
    * Old plaintext keys corresponding to these hashes remain valid until expiry.
@@ -99,8 +104,9 @@ export class ApiKeyManager {
     userId?: string;
     organizationId?: string;
     metadata?: Record<string, any>;
+    expiresAt?: number;
   }): Promise<{ apiKey: string; metadata: ApiKeyMetadata }> {
-    const { name, tier, userId, organizationId, metadata = {} } = options;
+    const { name, tier, userId, organizationId, metadata = {}, expiresAt } = options;
 
     // Input validation
     if (!name || name.trim().length === 0) {
@@ -116,6 +122,10 @@ export class ApiKeyManager {
       throw new Error(`Invalid tier: ${tier}`);
     }
 
+    if (expiresAt !== undefined && (!Number.isFinite(expiresAt) || expiresAt <= Date.now())) {
+      throw new Error('expiresAt must be a future timestamp');
+    }
+
     // Generate secure API key
     const keyId = this.generateKeyId();
     const apiKey = this.generateSecureKey(keyId);
@@ -129,6 +139,7 @@ export class ApiKeyManager {
       userId,
       organizationId,
       created: Date.now(),
+      expiresAt,
       isActive: true,
       usage: {
         totalRequests: 0,
@@ -174,6 +185,25 @@ export class ApiKeyManager {
           severity: 'medium',
           keyId,
           metadata: { reason: !metadata ? 'not_found' : 'inactive', duration: Date.now() - startTime }
+        });
+        return null;
+      }
+
+      if (this.isExpired(metadata)) {
+        metadata.isActive = false;
+        if (!metadata.revokedAt) {
+          metadata.revokedAt = metadata.expiresAt;
+        }
+        if (!metadata.revocationReason) {
+          metadata.revocationReason = 'expired';
+        }
+        await this.updateKeyMetadata(metadata);
+
+        log.security('API key validation failed - key expired', {
+          eventType: 'auth_failure',
+          severity: 'medium',
+          keyId,
+          metadata: { reason: 'expired', duration: Date.now() - startTime }
         });
         return null;
       }
@@ -241,7 +271,7 @@ export class ApiKeyManager {
   async rotateApiKey(keyId: string, options: { gracePeriodMs?: number } = {}): Promise<{ newApiKey: string; metadata: ApiKeyMetadata } | null> {
     const { gracePeriodMs = 1000 * 60 * 60 } = options; // 1 hour default
     const metadata = await this._getKeyMetadata(keyId);
-    if (!metadata || !metadata.isActive) return null;
+    if (!metadata || !metadata.isActive || this.isExpired(metadata)) return null;
 
     const now = Date.now();
     const expiresAt = now + gracePeriodMs;
@@ -261,6 +291,7 @@ export class ApiKeyManager {
     // Generate new key (reuse keyId for predictable prefix)
     const newPlain = this.generateSecureKey(keyId);
     metadata.key = this.hashKey(newPlain);
+    metadata.lastRotatedAt = now;
     await this.updateKeyMetadata(metadata);
     return { newApiKey: newPlain, metadata };
   }
@@ -340,19 +371,23 @@ export class ApiKeyManager {
   /**
    * Revoke an API key
    */
-  async revokeApiKey(keyId: string): Promise<boolean> {
+  async revokeApiKey(keyId: string, options: { revokedBy?: string; reason?: string } = {}): Promise<boolean> {
     try {
       const metadata = await this._getKeyMetadata(keyId);
       if (!metadata) return false;
 
       metadata.isActive = false;
+      metadata.revokedAt = Date.now();
+      metadata.revokedBy = options.revokedBy;
+      metadata.revocationReason = options.reason || 'manual_revocation';
+      metadata.previousKeyHashes = [];
       await this.updateKeyMetadata(metadata);
 
       log.security('API key revoked', {
         eventType: 'auth_success',
         severity: 'medium',
         keyId,
-        metadata: { userId: metadata.userId, tier: metadata.tier }
+        metadata: { userId: metadata.userId, tier: metadata.tier, revokedBy: options.revokedBy, reason: metadata.revocationReason }
       });
 
       return true;
@@ -462,6 +497,10 @@ export class ApiKeyManager {
   private async updateKeyMetadata(metadata: ApiKeyMetadata): Promise<void> {
     const key = `${this.metadataPrefix}${metadata.id}`;
     await this.redis.set(key, JSON.stringify(metadata));
+  }
+
+  private isExpired(metadata: ApiKeyMetadata): boolean {
+    return typeof metadata.expiresAt === 'number' && metadata.expiresAt <= Date.now();
   }
 
   private async addKeyToUser(userId: string, keyId: string): Promise<void> {
