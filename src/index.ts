@@ -39,7 +39,7 @@ const corsConfig = createCorsConfig();
 // Load and validate config centrally
 const appConfig: ApiRateLimiterConfig = loadConfig();
 log.system('Configuration loaded', {
-  environment: process.env.NODE_ENV || 'development',
+  environment: appConfig.environment.name,
   redisEnabled: appConfig.redis.enabled,
   defaultAlgorithm: appConfig.defaultRateLimit.algorithm,
   metadata: { rules: appConfig.rules.length }
@@ -67,7 +67,7 @@ app.use(helmet({
 app.use(cors(corsOptions));
 app.use(cookieParser()); // Add cookie parser for JWT support
 app.use(performanceMonitor.middleware()); // Add performance monitoring
-if (process.env.NODE_ENV !== 'test') {
+if (!appConfig.environment.isTest) {
   app.use(morgan('combined'));
 }
 app.use(express.json());
@@ -100,12 +100,12 @@ const criticalRateLimiter = createSensitiveEndpointLimiter(redis, 'critical');
 const managementRateLimiter = createSensitiveEndpointLimiter(redis, 'management');
 
 // Trust proxy (for accurate IP addresses)
-app.set('trust proxy', process.env.ENABLE_TRUST_PROXY === 'true');
+app.set('trust proxy', appConfig.environment.trustProxy);
 
 // IP Filter middleware
 const ipFilter = createIPFilterMiddleware({
-  whitelist: process.env.IP_WHITELIST ? process.env.IP_WHITELIST.split(',') : [],
-  blacklist: process.env.IP_BLACKLIST ? process.env.IP_BLACKLIST.split(',') : [],
+  whitelist: appConfig.environment.ipWhitelist,
+  blacklist: appConfig.environment.ipBlacklist,
 });
 
 // Request logger with stats integration
@@ -371,7 +371,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
     req,
     500,
     'Internal Server Error',
-    process.env.NODE_ENV === 'development' ? getErrorMessage(err) : 'An unexpected error occurred',
+    appConfig.environment.isDevelopment ? getErrorMessage(err) : 'An unexpected error occurred',
     {
       code: ERROR_CODES.SYSTEM.INTERNAL_SERVER_ERROR,
     }
@@ -379,7 +379,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 let server: any = null;
-if (process.env.NODE_ENV !== 'test') {
+if (!appConfig.environment.isTest) {
   server = app.listen(appConfig.server.port, appConfig.server.host, () => {
     log.system('API Rate Limiter started', {
       host: appConfig.server.host,
@@ -389,7 +389,7 @@ if (process.env.NODE_ENV !== 'test') {
       redisEnabled: appConfig.redis.enabled,
       defaultAlgorithm: appConfig.defaultRateLimit.algorithm,
       activeRules: appConfig.rules.length,
-      environment: process.env.NODE_ENV || 'development',
+      environment: appConfig.environment.name,
       metadata: {
         performanceMonitoring: true,
         cleanupTaskStarted: true
