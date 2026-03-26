@@ -1,8 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
 import { RedisClient } from '../utils/redis';
 import { RateLimitRule, RateLimitConfig } from '../types';
-import { createRateLimiter } from './rateLimiter';
+import { createOptimizedRateLimiter } from './optimizedRateLimiter';
 import { log } from '../utils/logger';
+import { getErrorMessage, sendError } from '../utils/httpErrors';
 
 export interface RateLimitMiddlewareOptions {
   redis: RedisClient;
@@ -24,61 +25,38 @@ export function createRateLimitMiddleware(options: RateLimitMiddlewareOptions) {
       // Generate key for rate limiting
       const key = generateKey(req, config, keyGenerator);
 
-      // Create rate limiter based on algorithm
-      const rateLimiter = createRateLimiter(redis, config);
+      const rateLimiter = createOptimizedRateLimiter(redis, {
+        windowMs: config.windowMs,
+        maxRequests: config.max,
+        algorithm: config.algorithm,
+        keyGenerator: () => key,
+        skipSuccessfulRequests: config.skipSuccessfulRequests,
+        skipFailedRequests: config.skipFailedRequests,
+        tokensPerInterval: config.algorithm === 'token-bucket'
+          ? resolveTokenBucketTokensPerInterval(config)
+          : undefined,
+        burstCapacity: config.algorithm === 'token-bucket'
+          ? resolveTokenBucketBurstCapacity(config)
+          : undefined,
+        onLimitReached: (currentReq, currentRes) => {
+          if (matchedRule) {
+            currentRes.set('X-RateLimit-Rule', matchedRule.name);
+          }
 
-      // Check rate limit
-      const { allowed, stats } = await rateLimiter.checkLimit(key);
+          if (onLimitReached && matchedRule) {
+            onLimitReached(currentReq, currentRes, matchedRule);
+          }
 
-      // Add rate limit headers
-      res.set({
-        'X-RateLimit-Limit': config.max.toString(),
-        'X-RateLimit-Remaining': stats.remainingRequests.toString(),
-        'X-RateLimit-Reset': new Date(stats.resetTime).toISOString(),
-        'X-RateLimit-Window': config.windowMs.toString(),
-        'X-RateLimit-Algorithm': config.algorithm,
-  // Standard draft headers (IETF RateLimit Fields)
-  'RateLimit-Policy': `${config.max};w=${Math.ceil(config.windowMs/1000)};type=${config.algorithm}`,
-  'RateLimit-Limit': config.max.toString(),
-  'RateLimit-Remaining': stats.remainingRequests.toString(),
-  'RateLimit-Reset': Math.ceil((stats.resetTime - Date.now()) / 1000).toString(),
+          if (config.onLimitReached) {
+            config.onLimitReached(currentReq, currentRes);
+          }
+        },
       });
 
-      if (matchedRule) {
-        res.set('X-RateLimit-Rule', matchedRule.name);
-      }
-
-      if (!allowed) {
-        // Rate limit exceeded
-        if (onLimitReached && matchedRule) {
-          onLimitReached(req, res, matchedRule);
-        }
-
-        if (config.onLimitReached) {
-          config.onLimitReached(req, res);
-        }
-
-        res.status(429).set({
-          'Retry-After': Math.ceil((stats.resetTime - Date.now()) / 1000).toString(),
-          'RateLimit-Remaining': '0',
-          'X-RateLimit-Remaining': '0',
-          'RateLimit-Reset': Math.ceil((stats.resetTime - Date.now()) / 1000).toString(),
-        }).json({
-          error: 'Too Many Requests',
-          message: 'Rate limit exceeded',
-          retryAfter: Math.ceil((stats.resetTime - Date.now()) / 1000),
-          limit: config.max,
-          windowMs: config.windowMs,
-          algorithm: config.algorithm
-        });
-        return;
-      }
-
-      // Request allowed, continue
-      next();
+      return rateLimiter.middleware()(req, res, next);
     } catch (error) {
       log.system('Rate limiting middleware error - failing open', {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
         severity: 'medium' as const,
         endpoint: req.path,
         method: req.method
@@ -87,6 +65,26 @@ export function createRateLimitMiddleware(options: RateLimitMiddlewareOptions) {
       next();
     }
   };
+}
+
+function resolveTokenBucketTokensPerInterval(config: RateLimitConfig): number {
+  const tokenBucketConfig = config as RateLimitConfig & { refillRate?: number };
+
+  if (typeof tokenBucketConfig.refillRate === 'number' && tokenBucketConfig.refillRate > 0) {
+    return Math.max(1, Math.floor((tokenBucketConfig.refillRate * config.windowMs) / 1000));
+  }
+
+  return config.max;
+}
+
+function resolveTokenBucketBurstCapacity(config: RateLimitConfig): number {
+  const tokenBucketConfig = config as RateLimitConfig & { bucketSize?: number };
+
+  if (typeof tokenBucketConfig.bucketSize === 'number' && tokenBucketConfig.bucketSize > 0) {
+    return tokenBucketConfig.bucketSize;
+  }
+
+  return config.max * 2;
 }
 
 function findMatchingRule(req: Request, rules: RateLimitRule[]): RateLimitRule | null {
@@ -135,15 +133,20 @@ export function createResetEndpoint(redis: RedisClient) {
       const { key } = req.params;
       
       if (!key) {
-        res.status(400).json({ error: 'Key parameter is required' });
+        sendError(res, req, 400, 'Missing key', 'Key parameter is required');
         return;
       }
 
+      const currentWindowStart = Math.floor(Date.now() / 60000) * 60000;
+
       // Try to delete keys for all algorithms
       const deletePromises = [
+        redis.del(key),
         redis.del(`tb:${key}`),
         redis.del(`sw:${key}`),
-        redis.del(`fw:${key}`)
+        redis.del(`fw:${key}`),
+        redis.del(`${key}:${currentWindowStart}`),
+        redis.del(`fw:${key}:${currentWindowStart}`)
       ];
 
       await Promise.all(deletePromises);
@@ -151,12 +154,12 @@ export function createResetEndpoint(redis: RedisClient) {
       res.json({ message: 'Rate limit reset successfully', key });
     } catch (error) {
       log.system('Rate limit reset error', {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
         severity: 'medium' as const,
         endpoint: req.path,
         method: req.method
       });
-      res.status(500).json({ error: 'Internal server error' });
+      sendError(res, req, 500, 'Internal Server Error', 'Failed to reset rate limit');
     }
   };
 }
