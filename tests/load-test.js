@@ -10,22 +10,60 @@ import { Rate } from 'k6/metrics';
 // Custom metrics
 const errorRate = new Rate('errors');
 
+const LOAD_PROFILES = {
+  smoke: {
+    stages: [
+      { duration: '15s', target: 5 },
+      { duration: '30s', target: 10 },
+      { duration: '15s', target: 0 },
+    ],
+    thresholds: {
+      http_req_duration: ['p(95)<300'],
+      http_req_failed: ['rate<0.05'],
+      errors: ['rate<0.05'],
+    },
+  },
+  baseline: {
+    stages: [
+      { duration: '30s', target: 20 },
+      { duration: '1m', target: 50 },
+      { duration: '30s', target: 100 },
+      { duration: '2m', target: 100 },
+      { duration: '30s', target: 200 },
+      { duration: '1m', target: 200 },
+      { duration: '30s', target: 0 },
+    ],
+    thresholds: {
+      http_req_duration: ['p(95)<500'],
+      http_req_failed: ['rate<0.1'],
+      errors: ['rate<0.1'],
+    },
+  },
+  stress: {
+    stages: [
+      { duration: '30s', target: 50 },
+      { duration: '1m', target: 150 },
+      { duration: '1m', target: 300 },
+      { duration: '2m', target: 300 },
+      { duration: '1m', target: 500 },
+      { duration: '30s', target: 0 },
+    ],
+    thresholds: {
+      http_req_duration: ['p(95)<800'],
+      http_req_failed: ['rate<0.15'],
+      errors: ['rate<0.15'],
+    },
+  },
+};
+
+const PROFILE = __ENV.LOAD_PROFILE || 'baseline';
+const selectedProfile = LOAD_PROFILES[PROFILE] || LOAD_PROFILES.baseline;
+
 // Test configuration
 export const options = {
-  stages: [
-    { duration: '30s', target: 20 },   // Ramp up to 20 users
-    { duration: '1m', target: 50 },    // Stay at 50 users
-    { duration: '30s', target: 100 },  // Ramp up to 100 users  
-    { duration: '2m', target: 100 },   // Stay at 100 users
-    { duration: '30s', target: 200 },  // Peak load
-    { duration: '1m', target: 200 },   // Sustain peak
-    { duration: '30s', target: 0 },    // Ramp down
-  ],
-  thresholds: {
-    http_req_duration: ['p(95)<500'], // 95% of requests under 500ms
-    http_req_failed: ['rate<0.1'],    // Error rate under 10%
-    errors: ['rate<0.1'],             // Custom error rate under 10%
-  },
+  stages: selectedProfile.stages,
+  thresholds: selectedProfile.thresholds,
+  summaryTrendStats: ['avg', 'min', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
 };
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:3000';
@@ -125,7 +163,7 @@ export default function () {
 
 // Setup function run once before all VUs
 export function setup() {
-  console.log('Starting load test against:', BASE_URL);
+  console.log(`Starting ${PROFILE} load test against:`, BASE_URL);
   
   // Health check before starting
   const response = http.get(`${BASE_URL}/health`);
@@ -138,5 +176,21 @@ export function setup() {
 
 // Teardown function run once after all VUs
 export function teardown(data) {
-  console.log('Load test completed against:', data.baseUrl);
+  console.log(`Load test profile "${PROFILE}" completed against:`, data.baseUrl);
+}
+
+export function handleSummary(data) {
+  const summaryPath = __ENV.K6_SUMMARY_PATH || `k6-summary-${PROFILE}.json`;
+  const summary = {
+    profile: PROFILE,
+    baseUrl: BASE_URL,
+    generatedAt: new Date().toISOString(),
+    metrics: data.metrics,
+    rootGroup: data.root_group,
+  };
+
+  return {
+    stdout: `\nLoad test profile: ${PROFILE}\nSummary written to: ${summaryPath}\n`,
+    [summaryPath]: JSON.stringify(summary, null, 2),
+  };
 }
