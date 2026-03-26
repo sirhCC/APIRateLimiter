@@ -57,8 +57,14 @@ describe('Error code regressions', () => {
   it('returns VAL001 when API key listing query validation fails', async () => {
     const app = await loadApp();
 
+    const loginResponse = await request(app)
+      .post('/auth/login')
+      .send({ email: 'admin@example.com', password: 'demo123' })
+      .expect(200);
+
     const response = await request(app)
       .get('/api-keys')
+      .set('Authorization', `Bearer ${loginResponse.body.token}`)
       .expect(400);
 
     expect(response.body).toMatchObject({
