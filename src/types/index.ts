@@ -86,6 +86,7 @@ export interface ApiRateLimiterConfig {
     jwtExpiresIn: string;
     jwtAlgorithm: string;
     demoUsersEnabled: boolean;
+    demoEndpointsEnabled: boolean;
     corsOrigin: string;
     logAuthEvents: boolean;
     logRateLimitViolations: boolean;
