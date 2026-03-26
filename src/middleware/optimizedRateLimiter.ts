@@ -3,6 +3,7 @@ import { RedisClient } from '../utils/redis.js';
 import { log } from '../utils/logger';
 import { rateLimitDecisionDuration, rateLimitRequestsTotal } from '../utils/metrics';
 import { sendError } from '../utils/httpErrors';
+import { ERROR_CODES } from '../utils/errorCodes';
 
 export interface OptimizedRateLimitConfig {
   windowMs: number;
@@ -131,6 +132,7 @@ export class OptimizedRateLimiter {
               'Too Many Requests',
               `Rate limit exceeded. Try again in ${retryAfterSeconds} seconds.`,
               {
+                code: ERROR_CODES.RATE_LIMIT.EXCEEDED,
                 extra: {
                   retryAfter: retryAfterSeconds,
                   limit: this.config.maxRequests,
