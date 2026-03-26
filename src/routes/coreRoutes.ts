@@ -9,6 +9,7 @@ import { computeConfigHash } from '../utils/config';
 import { createOptimizedRateLimiter, RateLimitPresets } from '../middleware/optimizedRateLimiter';
 import { requireJWT, requirePermission, requireRole } from '../middleware/jwtAuth';
 import { getErrorMessage, sendError } from '../utils/httpErrors';
+import { ERROR_CODES } from '../utils/errorCodes';
 import {
   validateApiKeyEndpoint,
   validateJwtEndpoint,
@@ -175,7 +176,9 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
         },
       });
     } catch (error) {
-      return sendError(res, req, 500, 'Failed to add/update rule', getErrorMessage(error));
+      return sendError(res, req, 500, 'Failed to add/update rule', getErrorMessage(error), {
+        code: ERROR_CODES.RULES.UPSERT_FAILED,
+      });
     }
   });
 
@@ -185,7 +188,9 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
       const index = appConfig.rules.findIndex((rule) => rule.id === ruleId);
 
       if (index === -1) {
-        return sendError(res, req, 404, 'Rule not found', `Rule with ID '${ruleId}' does not exist`);
+        return sendError(res, req, 404, 'Rule not found', `Rule with ID '${ruleId}' does not exist`, {
+          code: ERROR_CODES.RULES.NOT_FOUND,
+        });
       }
 
       appConfig.rules.splice(index, 1);
@@ -194,7 +199,9 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
         rule: undefined,
       });
     } catch (error) {
-      return sendError(res, req, 500, 'Failed to delete rule', getErrorMessage(error));
+      return sendError(res, req, 500, 'Failed to delete rule', getErrorMessage(error), {
+        code: ERROR_CODES.RULES.DELETE_FAILED,
+      });
     }
   });
 
@@ -224,7 +231,9 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
         endpoint: req.path,
         method: req.method,
       });
-      sendError(res, req, 500, 'Internal Server Error', getErrorMessage(error));
+      sendError(res, req, 500, 'Internal Server Error', getErrorMessage(error), {
+        code: ERROR_CODES.RATE_LIMIT.RESET_FAILED,
+      });
     }
   });
 
@@ -233,7 +242,9 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
       const { email, password } = req.body;
 
       if (!appConfig.security.demoUsersEnabled) {
-        sendError(res, req, 503, 'Demo authentication disabled', 'Demo users are disabled. Please configure your own authentication system.');
+        sendError(res, req, 503, 'Demo authentication disabled', 'Demo users are disabled. Please configure your own authentication system.', {
+          code: ERROR_CODES.AUTH.DEMO_DISABLED,
+        });
         return;
       }
 
@@ -246,7 +257,9 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
 
       const user = demoUsers[email as keyof typeof demoUsers];
       if (!user || password !== 'demo123') {
-        sendError(res, req, 401, 'Invalid credentials', 'Use one of the demo accounts: admin@example.com, premium@example.com, user@example.com, guest@example.com with password: demo123');
+        sendError(res, req, 401, 'Invalid credentials', 'Use one of the demo accounts: admin@example.com, premium@example.com, user@example.com, guest@example.com with password: demo123', {
+          code: ERROR_CODES.AUTH.INVALID_CREDENTIALS,
+        });
         return;
       }
 
@@ -277,7 +290,9 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
         expiresIn: '24h',
       });
     } catch (error) {
-      sendError(res, req, 500, 'Authentication failed', getErrorMessage(error));
+      sendError(res, req, 500, 'Authentication failed', getErrorMessage(error), {
+        code: ERROR_CODES.AUTH.LOGIN_FAILED,
+      });
     }
   });
 
@@ -296,7 +311,9 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
 
   app.get('/metrics', async (req: Request, res: Response): Promise<void> => {
     if (process.env.METRICS_ENABLED === 'false') {
-      sendError(res, req, 404, 'Metrics disabled', 'Metrics are disabled');
+      sendError(res, req, 404, 'Metrics disabled', 'Metrics are disabled', {
+        code: ERROR_CODES.METRICS.DISABLED,
+      });
       return;
     }
 
@@ -315,7 +332,9 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
         severity: 'medium',
         endpoint: '/metrics',
       });
-      sendError(res, req, 500, 'Metrics Error', 'Failed to render metrics');
+      sendError(res, req, 500, 'Metrics Error', 'Failed to render metrics', {
+        code: ERROR_CODES.METRICS.RENDER_FAILED,
+      });
     }
   });
 
@@ -395,7 +414,9 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
         },
       });
     } catch (error) {
-      sendError(res, req, 500, 'Stats Error', getErrorMessage(error));
+      sendError(res, req, 500, 'Stats Error', getErrorMessage(error), {
+        code: ERROR_CODES.STATS.READ_FAILED,
+      });
     }
   });
 
@@ -427,7 +448,9 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
         },
       });
     } catch (error) {
-      sendError(res, req, 500, 'Performance Error', getErrorMessage(error));
+      sendError(res, req, 500, 'Performance Error', getErrorMessage(error), {
+        code: ERROR_CODES.PERFORMANCE.READ_FAILED,
+      });
     }
   });
 
@@ -435,12 +458,15 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
     try {
       const endpoint = decodeURIComponent(req.params[0] || '');
       if (!endpoint) {
-        return sendError(res, req, 400, 'Missing endpoint', 'Endpoint path is required');
+        return sendError(res, req, 400, 'Missing endpoint', 'Endpoint path is required', {
+          code: ERROR_CODES.PERFORMANCE.ENDPOINT_MISSING,
+        });
       }
 
       const endpointStats = performanceMonitor.getEndpointStats(endpoint);
       if (!endpointStats) {
         return sendError(res, req, 404, 'Performance data not found', 'No performance data found for this endpoint', {
+          code: ERROR_CODES.PERFORMANCE.ENDPOINT_NOT_FOUND,
           extra: { endpoint },
         });
       }
@@ -452,7 +478,9 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
         stats: endpointStats,
       });
     } catch (error) {
-      return sendError(res, req, 500, 'Performance Error', getErrorMessage(error));
+      return sendError(res, req, 500, 'Performance Error', getErrorMessage(error), {
+        code: ERROR_CODES.PERFORMANCE.READ_FAILED,
+      });
     }
   });
 
@@ -464,7 +492,9 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
         data: exportData,
       });
     } catch (error) {
-      sendError(res, req, 500, 'Metrics Export Error', 'Failed to export metrics');
+      sendError(res, req, 500, 'Metrics Export Error', 'Failed to export metrics', {
+        code: ERROR_CODES.METRICS.EXPORT_FAILED,
+      });
     }
   });
 
