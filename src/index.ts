@@ -307,6 +307,7 @@ registerCoreRoutes(app, {
     corsOrigin: corsConfig.origins.length === 1 && corsConfig.origins[0] === '*' ? '*' : `${corsConfig.origins.length} origins configured`,
     corsInfo: getCorsInfo(corsConfig),
     demoUsersEnabled: appConfig.security.demoUsersEnabled,
+    demoEndpointsEnabled: appConfig.security.demoEndpointsEnabled,
   },
 });
 
