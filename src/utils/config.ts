@@ -21,6 +21,7 @@ const EnvSchema = z.object({
   JWT_EXPIRES_IN: z.string().optional().default('24h'),
   JWT_ALGORITHM: z.enum(['HS256']).optional().default('HS256'),
   DEMO_USERS_ENABLED: z.string().optional(),
+  DEMO_ENDPOINTS_ENABLED: z.string().optional(),
   CORS_ORIGIN: z.string().optional().default('development-default'),
   LOG_AUTH_EVENTS: z.string().optional(),
   LOG_RATE_LIMIT_VIOLATIONS: z.string().optional(),
@@ -43,6 +44,7 @@ function parseRules(json?: string): RateLimitRule[] {
 
 export function loadConfig(): ApiRateLimiterConfig {
   const parsed = EnvSchema.parse(process.env);
+  const demoFeaturesEnabledByDefault = parsed.NODE_ENV === 'development' || parsed.NODE_ENV === 'test';
 
   const rules = parseRules(parsed.RATE_LIMIT_RULES);
 
@@ -72,7 +74,8 @@ export function loadConfig(): ApiRateLimiterConfig {
       jwtSecret: parsed.JWT_SECRET || 'fallback-demo-secret-change-in-production',
       jwtExpiresIn: parsed.JWT_EXPIRES_IN,
       jwtAlgorithm: parsed.JWT_ALGORITHM,
-      demoUsersEnabled: parsed.DEMO_USERS_ENABLED !== 'false',
+      demoUsersEnabled: parsed.DEMO_USERS_ENABLED ? parsed.DEMO_USERS_ENABLED === 'true' : demoFeaturesEnabledByDefault,
+      demoEndpointsEnabled: parsed.DEMO_ENDPOINTS_ENABLED ? parsed.DEMO_ENDPOINTS_ENABLED === 'true' : demoFeaturesEnabledByDefault,
       corsOrigin: parsed.CORS_ORIGIN,
       logAuthEvents: parsed.LOG_AUTH_EVENTS === 'true',
       logRateLimitViolations: parsed.LOG_RATE_LIMIT_VIOLATIONS === 'true',
@@ -99,6 +102,7 @@ function configFingerprintSubset(cfg: ApiRateLimiterConfig) {
     monitoring: cfg.monitoring,
     security: { // exclude secrets
       demoUsersEnabled: cfg.security.demoUsersEnabled,
+      demoEndpointsEnabled: cfg.security.demoEndpointsEnabled,
       corsOrigin: cfg.security.corsOrigin,
       jwtAlgorithm: cfg.security.jwtAlgorithm,
     },
@@ -126,7 +130,7 @@ export function computeConfigHash(cfg: ApiRateLimiterConfig): { hash: string; in
       'redis.host','redis.port','redis.enabled','redis.db',
       'defaultRateLimit.windowMs','defaultRateLimit.max','defaultRateLimit.algorithm',
       'monitoring.enabled','monitoring.statsRetentionMs',
-      'security.demoUsersEnabled','security.corsOrigin','security.jwtAlgorithm',
+      'security.demoUsersEnabled','security.demoEndpointsEnabled','security.corsOrigin','security.jwtAlgorithm',
       'rules[].id','rules[].pattern','rules[].method','rules[].priority','rules[].enabled','rules[].config'
     ]
   };
