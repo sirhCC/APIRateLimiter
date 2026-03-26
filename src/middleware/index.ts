@@ -4,6 +4,7 @@ import { RateLimitRule, RateLimitConfig } from '../types';
 import { createOptimizedRateLimiter } from './optimizedRateLimiter';
 import { log } from '../utils/logger';
 import { getErrorMessage, sendError } from '../utils/httpErrors';
+import { ERROR_CODES } from '../utils/errorCodes';
 
 export interface RateLimitMiddlewareOptions {
   redis: RedisClient;
@@ -133,7 +134,9 @@ export function createResetEndpoint(redis: RedisClient) {
       const { key } = req.params;
       
       if (!key) {
-        sendError(res, req, 400, 'Missing key', 'Key parameter is required');
+        sendError(res, req, 400, 'Missing key', 'Key parameter is required', {
+          code: ERROR_CODES.RATE_LIMIT.RESET_KEY_MISSING,
+        });
         return;
       }
 
@@ -159,7 +162,9 @@ export function createResetEndpoint(redis: RedisClient) {
         endpoint: req.path,
         method: req.method
       });
-      sendError(res, req, 500, 'Internal Server Error', 'Failed to reset rate limit');
+      sendError(res, req, 500, 'Internal Server Error', 'Failed to reset rate limit', {
+        code: ERROR_CODES.RATE_LIMIT.RESET_FAILED,
+      });
     }
   };
 }
