@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { log } from '../utils/logger';
 import { buildErrorResponse, getErrorMessage, sendError } from '../utils/httpErrors';
+import { ERROR_CODES } from '../utils/errorCodes';
 
 /**
  * Validation Middleware for API Rate Limiter
@@ -68,7 +69,10 @@ export function validateRequest(options: ValidationOptions) {
       }
 
       if (errors.length > 0) {
-        sendError(res, req, 400, 'Validation Error', 'Request validation failed', { details: errors });
+        sendError(res, req, 400, 'Validation Error', 'Request validation failed', {
+          code: ERROR_CODES.VALIDATION.REQUEST_FAILED,
+          details: errors,
+        });
         return;
       }
 
@@ -85,7 +89,9 @@ export function validateRequest(options: ValidationOptions) {
         endpoint: req.path,
         method: req.method
       });
-      sendError(res, req, 500, 'Internal Validation Error', 'An error occurred during request validation');
+      sendError(res, req, 500, 'Internal Validation Error', 'An error occurred during request validation', {
+        code: ERROR_CODES.VALIDATION.INTERNAL_ERROR,
+      });
     }
   };
 }
@@ -119,6 +125,7 @@ export function validateResponse() {
             // In development, return validation error
             if (process.env.NODE_ENV === 'development') {
               return originalJson.call(this, buildErrorResponse(req, 'Response Validation Error', 'Response validation failed', {
+                code: ERROR_CODES.VALIDATION.RESPONSE_FAILED,
                 details: formatZodErrors(result.error, 'response'),
                 statusCode: 500,
               }));
@@ -126,6 +133,7 @@ export function validateResponse() {
 
             // In production, log error but send sanitized response
             return originalJson.call(this, buildErrorResponse(req, 'Internal Server Error', 'An error occurred while processing your request', {
+              code: ERROR_CODES.SYSTEM.INTERNAL_SERVER_ERROR,
               statusCode: 500,
             }));
           }
@@ -144,6 +152,7 @@ export function validateResponse() {
         });
 
         return originalJson.call(this, buildErrorResponse(req, 'Internal Server Error', 'An error occurred while processing your request', {
+          code: ERROR_CODES.SYSTEM.INTERNAL_SERVER_ERROR,
           statusCode: 500,
         }));
       }
