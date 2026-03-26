@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { RedisClient } from '../utils/redis.js';
 import { log } from '../utils/logger';
 import { rateLimitDecisionDuration, rateLimitRequestsTotal } from '../utils/metrics';
+import { sendError } from '../utils/httpErrors';
 
 export interface OptimizedRateLimitConfig {
   windowMs: number;
@@ -120,12 +121,24 @@ export class OptimizedRateLimiter {
           
           if (this.config.onLimitReached) {
             this.config.onLimitReached(req, res);
-          } else {
-            res.json({
-              error: 'Too Many Requests',
-              message: `Rate limit exceeded. Try again in ${Math.ceil(this.config.windowMs / 1000)} seconds.`,
-              retryAfter: Math.ceil(this.config.windowMs / 1000),
-            });
+          }
+
+          if (!res.headersSent && !res.writableEnded) {
+            sendError(
+              res,
+              req,
+              429,
+              'Too Many Requests',
+              `Rate limit exceeded. Try again in ${retryAfterSeconds} seconds.`,
+              {
+                extra: {
+                  retryAfter: retryAfterSeconds,
+                  limit: this.config.maxRequests,
+                  windowMs: this.config.windowMs,
+                  algorithm: this.config.algorithm,
+                },
+              }
+            );
           }
           return;
         }
