@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { ErrorResponseSchema } from '../utils/schemas.js';
 import { log } from '../utils/logger';
+import { buildErrorResponse, getErrorMessage, sendError } from '../utils/httpErrors';
 
 /**
  * Validation Middleware for API Rate Limiter
@@ -68,16 +68,7 @@ export function validateRequest(options: ValidationOptions) {
       }
 
       if (errors.length > 0) {
-        const errorResponse = {
-          error: 'Validation Error',
-          message: 'Request validation failed',
-          details: errors,
-          timestamp: new Date().toISOString(),
-          path: req.path,
-          statusCode: 400,
-        };
-
-        res.status(400).json(errorResponse);
+        sendError(res, req, 400, 'Validation Error', 'Request validation failed', { details: errors });
         return;
       }
 
@@ -89,20 +80,12 @@ export function validateRequest(options: ValidationOptions) {
       next();
     } catch (error) {
       log.system('Validation middleware error', {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
         severity: 'medium' as const,
         endpoint: req.path,
         method: req.method
       });
-      const errorResponse = {
-        error: 'Internal Validation Error',
-        message: 'An error occurred during request validation',
-        timestamp: new Date().toISOString(),
-        path: req.path,
-        statusCode: 500,
-      };
-
-      res.status(500).json(errorResponse);
+      sendError(res, req, 500, 'Internal Validation Error', 'An error occurred during request validation');
     }
   };
 }
@@ -135,28 +118,16 @@ export function validateResponse() {
 
             // In development, return validation error
             if (process.env.NODE_ENV === 'development') {
-              const errorResponse = {
-                error: 'Response Validation Error',
-                message: 'Response validation failed',
+              return originalJson.call(this, buildErrorResponse(req, 'Response Validation Error', 'Response validation failed', {
                 details: formatZodErrors(result.error, 'response'),
-                timestamp: new Date().toISOString(),
-                path: req.path,
                 statusCode: 500,
-              };
-
-              return originalJson.call(this, errorResponse);
+              }));
             }
 
             // In production, log error but send sanitized response
-            const sanitizedResponse = {
-              error: 'Internal Server Error',
-              message: 'An error occurred while processing your request',
-              timestamp: new Date().toISOString(),
-              path: req.path,
+            return originalJson.call(this, buildErrorResponse(req, 'Internal Server Error', 'An error occurred while processing your request', {
               statusCode: 500,
-            };
-
-            return originalJson.call(this, sanitizedResponse);
+            }));
           }
 
           // Use validated data
@@ -166,21 +137,15 @@ export function validateResponse() {
         return originalJson.call(this, body);
       } catch (error) {
         log.system('Response validation middleware error', {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
           severity: 'medium' as const,
           endpoint: req.path,
           method: req.method
         });
-        
-        const errorResponse = {
-          error: 'Internal Server Error',
-          message: 'An error occurred while processing your request',
-          timestamp: new Date().toISOString(),
-          path: req.path,
-          statusCode: 500,
-        };
 
-        return originalJson.call(this, errorResponse);
+        return originalJson.call(this, buildErrorResponse(req, 'Internal Server Error', 'An error occurred while processing your request', {
+          statusCode: 500,
+        }));
       }
     };
 
