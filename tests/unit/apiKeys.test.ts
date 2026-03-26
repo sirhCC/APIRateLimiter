@@ -64,12 +64,14 @@ describe('API Key Utilities', () => {
     });
 
     it('should create API keys with proper metadata', async () => {
+      const expiresAt = Date.now() + 60_000;
       const result = await apiKeyManager.generateApiKey({
         name: 'Premium Test Key',
         tier: 'premium',
         userId: 'premium-user',
         organizationId: 'test-org',
-        metadata: { department: 'engineering' }
+        metadata: { department: 'engineering' },
+        expiresAt,
       });
 
       const metadata = result.metadata;
@@ -78,6 +80,7 @@ describe('API Key Utilities', () => {
       expect(metadata.userId).toBe('premium-user');
       expect(metadata.organizationId).toBe('test-org');
       expect(metadata.isActive).toBe(true);
+      expect(metadata.expiresAt).toBe(expiresAt);
       expect(metadata.metadata.department).toBe('engineering');
       expect(metadata.created).toBeGreaterThan(0);
     });
@@ -165,6 +168,24 @@ describe('API Key Utilities', () => {
       const metadata = await apiKeyManager.getKeyMetadata('non-existent-key-id');
       expect(metadata).toBeNull();
     });
+
+    it('should reject expired API keys', async () => {
+      const result = await apiKeyManager.generateApiKey({
+        name: 'Expiring Key',
+        tier: 'free',
+        userId: 'exp-user',
+        expiresAt: Date.now() + 25,
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 40));
+
+      const metadata = await apiKeyManager.validateApiKey(result.apiKey);
+      expect(metadata).toBeNull();
+
+      const storedMetadata = await apiKeyManager.getKeyMetadata(result.metadata.id);
+      expect(storedMetadata?.isActive).toBe(false);
+      expect(storedMetadata?.revocationReason).toBe('expired');
+    });
   });
 
   describe('API Key Management', () => {
@@ -180,11 +201,17 @@ describe('API Key Utilities', () => {
     });
 
     it('should revoke API keys', async () => {
-      const success = await apiKeyManager.revokeApiKey(testKeyId);
+      const success = await apiKeyManager.revokeApiKey(testKeyId, {
+        revokedBy: 'admin-user',
+        reason: 'suspicious_activity',
+      });
       expect(success).toBe(true);
 
       const metadata = await apiKeyManager.getKeyMetadata(testKeyId);
       expect(metadata?.isActive).toBe(false);
+      expect(metadata?.revokedBy).toBe('admin-user');
+      expect(metadata?.revocationReason).toBe('suspicious_activity');
+      expect(metadata?.revokedAt).toBeDefined();
     });
 
     it('should handle revoking non-existent keys', async () => {
@@ -249,6 +276,20 @@ describe('API Key Utilities', () => {
       expect(oldAfterExpiry).toBeNull();
       const newStillValid = await apiKeyManager.validateApiKey(newPlain);
       expect(newStillValid).not.toBeNull();
+
+      const rotatedMetadata = await apiKeyManager.getKeyMetadata(keyId);
+      expect(rotatedMetadata?.lastRotatedAt).toBeDefined();
+    });
+
+    it('should reject generation with a past expiry', async () => {
+      await expect(
+        apiKeyManager.generateApiKey({
+          name: 'Already Expired',
+          tier: 'free',
+          userId: 'expired-user',
+          expiresAt: Date.now() - 1000,
+        })
+      ).rejects.toThrow('expiresAt must be a future timestamp');
     });
   });
 
