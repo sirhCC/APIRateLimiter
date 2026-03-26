@@ -1,5 +1,6 @@
 import { Express, Request, Response, RequestHandler } from 'express';
 import { ApiKeyManager } from '../utils/apiKeys';
+import { requireJWT, requireRole } from '../middleware/jwtAuth';
 import { validateApiKeyEndpoint, validateSystemEndpoint } from '../middleware/validation';
 import { getErrorMessage, sendError } from '../utils/httpErrors';
 import { ERROR_CODES } from '../utils/errorCodes';
@@ -13,6 +14,7 @@ import {
 } from '../utils/schemas';
 
 export interface RegisterApiKeyRoutesOptions {
+  jwtSecret: string;
   apiKeyManager: ApiKeyManager;
   managementRateLimiter: RequestHandler;
   criticalRateLimiter: RequestHandler;
@@ -37,7 +39,8 @@ function serializeApiKeyMetadata(metadata: Awaited<ReturnType<ApiKeyManager['get
 }
 
 export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutesOptions): void {
-  const { apiKeyManager, managementRateLimiter, criticalRateLimiter } = options;
+  const { jwtSecret, apiKeyManager, managementRateLimiter, criticalRateLimiter } = options;
+  const requireApiKeyAdmin = [requireJWT(jwtSecret), requireRole(['admin'])] as const;
 
   app.get('/api-keys/tiers', validateSystemEndpoint(undefined, ApiKeyTiersResponseSchema), (req: Request, res: Response) => {
     res.json({
@@ -79,7 +82,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
     });
   });
 
-  app.post('/api-keys', managementRateLimiter, validateApiKeyEndpoint(CreateApiKeyRequestSchema, undefined, undefined, ApiKeyResponseSchema), async (req: Request, res: Response): Promise<void> => {
+  app.post('/api-keys', ...requireApiKeyAdmin, managementRateLimiter, validateApiKeyEndpoint(CreateApiKeyRequestSchema, undefined, undefined, ApiKeyResponseSchema), async (req: Request, res: Response): Promise<void> => {
     try {
       const { name, tier = 'free', userId, organizationId, metadata, expiresAt } = req.body;
       const expiresAtTimestamp = typeof expiresAt === 'string' ? Date.parse(expiresAt) : undefined;
@@ -109,7 +112,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
     }
   });
 
-  app.get('/api-keys', validateApiKeyEndpoint(undefined, ListApiKeysQuerySchema, undefined, undefined), async (req: Request, res: Response): Promise<void> => {
+  app.get('/api-keys', ...requireApiKeyAdmin, validateApiKeyEndpoint(undefined, ListApiKeysQuerySchema, undefined, undefined), async (req: Request, res: Response): Promise<void> => {
     try {
       const queryData = (req as Request & { validatedQuery?: { userId: string } }).validatedQuery || req.query;
       const userId = typeof queryData.userId === 'string' ? queryData.userId : undefined;
@@ -134,7 +137,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
     }
   });
 
-  app.get('/api-keys/:keyId', validateApiKeyEndpoint(undefined, undefined, ApiKeyParamsSchema, undefined), async (req: Request, res: Response): Promise<void> => {
+  app.get('/api-keys/:keyId', ...requireApiKeyAdmin, validateApiKeyEndpoint(undefined, undefined, ApiKeyParamsSchema, undefined), async (req: Request, res: Response): Promise<void> => {
     try {
       const paramsData = (req as Request & { validatedParams?: { keyId: string } }).validatedParams || req.params;
       const { keyId } = paramsData;
@@ -149,7 +152,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
 
       res.json({
         message: 'API key details',
-        metadata: keyMetadata,
+        metadata: serializeApiKeyMetadata(keyMetadata),
       });
     } catch (error) {
       sendError(res, req, 500, 'API key lookup failed', getErrorMessage(error), {
@@ -158,7 +161,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
     }
   });
 
-  app.delete('/api-keys/:keyId', criticalRateLimiter, validateApiKeyEndpoint(undefined, undefined, ApiKeyParamsSchema, undefined), async (req: Request, res: Response): Promise<void> => {
+  app.delete('/api-keys/:keyId', ...requireApiKeyAdmin, criticalRateLimiter, validateApiKeyEndpoint(undefined, undefined, ApiKeyParamsSchema, undefined), async (req: Request, res: Response): Promise<void> => {
     try {
       const paramsData = (req as Request & { validatedParams?: { keyId: string } }).validatedParams || req.params;
       const { keyId } = paramsData;
@@ -187,7 +190,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
     }
   });
 
-  app.post('/api-keys/:keyId/rotate', managementRateLimiter, validateApiKeyEndpoint(undefined, undefined, ApiKeyParamsSchema, undefined), async (req: Request, res: Response): Promise<void> => {
+  app.post('/api-keys/:keyId/rotate', ...requireApiKeyAdmin, managementRateLimiter, validateApiKeyEndpoint(undefined, undefined, ApiKeyParamsSchema, undefined), async (req: Request, res: Response): Promise<void> => {
     try {
       const paramsData = (req as Request & { validatedParams?: { keyId: string } }).validatedParams || req.params;
       const { keyId } = paramsData;
@@ -223,7 +226,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
     }
   });
 
-  app.get('/api-keys/:keyId/usage', validateApiKeyEndpoint(undefined, undefined, ApiKeyParamsSchema, ApiKeyUsageResponseSchema), async (req: Request, res: Response): Promise<void> => {
+  app.get('/api-keys/:keyId/usage', ...requireApiKeyAdmin, validateApiKeyEndpoint(undefined, undefined, ApiKeyParamsSchema, ApiKeyUsageResponseSchema), async (req: Request, res: Response): Promise<void> => {
     try {
       const paramsData = (req as Request & { validatedParams?: { keyId: string } }).validatedParams || req.params;
       const { keyId } = paramsData;
