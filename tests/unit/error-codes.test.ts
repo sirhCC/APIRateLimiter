@@ -44,6 +44,16 @@ describe('Error code regressions', () => {
     });
   });
 
+  it('does not expose demo endpoints by default in production', async () => {
+    process.env.DEMO_ENDPOINTS_ENABLED = 'false';
+
+    const app = await loadApp();
+
+    await request(app)
+      .get('/test')
+      .expect(404);
+  });
+
   it('returns VAL001 when API key listing query validation fails', async () => {
     const app = await loadApp();
 
