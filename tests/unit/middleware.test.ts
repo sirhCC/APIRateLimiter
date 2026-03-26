@@ -16,6 +16,7 @@ import { createApiKeyMiddleware, requireApiKey } from '../../src/middleware/apiK
 import { createSensitiveEndpointLimiter } from '../../src/middleware/sensitiveEndpointLimiter';
 import { RedisClient } from '../../src/utils/redis';
 import { ApiKeyManager, ApiKeyMetadata } from '../../src/utils/apiKeys';
+import { ERROR_CODES } from '../../src/utils/errorCodes';
 
 // Mock Redis and other dependencies
 jest.mock('../../src/utils/redis');
@@ -168,11 +169,33 @@ describe('Middleware Tests', () => {
       
       expect(mockRes.status).toHaveBeenCalledWith(429);
       expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({
-        error: 'Too Many Requests'
+        error: 'Too Many Requests',
+        code: ERROR_CODES.RATE_LIMIT.EXCEEDED
       }));
       // Verify 429 sets standard reset headers
       expect(mockRes.set).toHaveBeenCalledWith(expect.objectContaining({
         'RateLimit-Remaining': '0'
+      }));
+      expect(mockNext).not.toHaveBeenCalled();
+    });
+
+    it('should still send a standardized 429 body when onLimitReached does not end the response', async () => {
+      mockRedis.tokenBucket.mockResolvedValue({ allowed: false, remainingTokens: 0 });
+
+      const onLimitReached = jest.fn();
+      const rateLimiter = createOptimizedRateLimiter(mockRedis, {
+        ...rateLimitConfig,
+        onLimitReached,
+      });
+      const middleware = rateLimiter.middleware();
+
+      await middleware(mockReq as Request, mockRes as Response, mockNext);
+
+      expect(onLimitReached).toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(429);
+      expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({
+        code: ERROR_CODES.RATE_LIMIT.EXCEEDED,
+        error: 'Too Many Requests',
       }));
       expect(mockNext).not.toHaveBeenCalled();
     });
