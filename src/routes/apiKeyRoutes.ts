@@ -4,6 +4,7 @@ import { requireJWT, requireRole } from '../middleware/jwtAuth';
 import { validateApiKeyEndpoint, validateSystemEndpoint } from '../middleware/validation';
 import { getErrorMessage, sendError } from '../utils/httpErrors';
 import { ERROR_CODES } from '../utils/errorCodes';
+import { buildApiKeyRequestMetadata, parseApiKeyExpiry, serializeApiKeyMetadata } from '../services/apiKeyRouteService';
 import {
   ApiKeyParamsSchema,
   ApiKeyResponseSchema,
@@ -18,24 +19,6 @@ export interface RegisterApiKeyRoutesOptions {
   apiKeyManager: ApiKeyManager;
   managementRateLimiter: RequestHandler;
   criticalRateLimiter: RequestHandler;
-}
-
-function serializeApiKeyMetadata(metadata: Awaited<ReturnType<ApiKeyManager['getKeyMetadata']>> extends infer T ? T extends null ? never : T : never) {
-  return {
-    id: metadata.id,
-    name: metadata.name,
-    tier: metadata.tier,
-    userId: metadata.userId,
-    organizationId: metadata.organizationId,
-    createdAt: new Date(metadata.created).toISOString(),
-    expiresAt: metadata.expiresAt ? new Date(metadata.expiresAt).toISOString() : undefined,
-    isActive: metadata.isActive,
-    revokedAt: metadata.revokedAt ? new Date(metadata.revokedAt).toISOString() : undefined,
-    revokedBy: metadata.revokedBy,
-    revocationReason: metadata.revocationReason,
-    lastRotatedAt: metadata.lastRotatedAt ? new Date(metadata.lastRotatedAt).toISOString() : undefined,
-    metadata: metadata.metadata,
-  };
 }
 
 export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutesOptions): void {
@@ -85,19 +68,14 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
   app.post('/api-keys', ...requireApiKeyAdmin, managementRateLimiter, validateApiKeyEndpoint(CreateApiKeyRequestSchema, undefined, undefined, ApiKeyResponseSchema), async (req: Request, res: Response): Promise<void> => {
     try {
       const { name, tier = 'free', userId, organizationId, metadata, expiresAt } = req.body;
-      const expiresAtTimestamp = typeof expiresAt === 'string' ? Date.parse(expiresAt) : undefined;
 
       const result = await apiKeyManager.generateApiKey({
         name,
         tier,
         userId,
         organizationId,
-        expiresAt: Number.isFinite(expiresAtTimestamp) ? expiresAtTimestamp : undefined,
-        metadata: {
-          ...metadata,
-          userAgent: req.get('User-Agent'),
-          ipAddress: req.ip,
-        },
+        expiresAt: parseApiKeyExpiry(expiresAt),
+        metadata: buildApiKeyRequestMetadata(req, metadata),
       });
 
       res.status(201).json({
