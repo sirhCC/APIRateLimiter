@@ -8,6 +8,7 @@ import { renderMetrics } from '../utils/metrics';
 import { computeConfigHash } from '../utils/config';
 import { createOptimizedRateLimiter, RateLimitPresets } from '../middleware/optimizedRateLimiter';
 import { requireJWT, requirePermission, requireRole } from '../middleware/jwtAuth';
+import { getErrorMessage, sendError } from '../utils/httpErrors';
 import {
   validateApiKeyEndpoint,
   validateJwtEndpoint,
@@ -174,10 +175,7 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
         },
       });
     } catch (error) {
-      return res.status(500).json({
-        error: 'Failed to add/update rule',
-        message: error instanceof Error ? error.message : 'Unknown error',
-      });
+      return sendError(res, req, 500, 'Failed to add/update rule', getErrorMessage(error));
     }
   });
 
@@ -187,10 +185,7 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
       const index = appConfig.rules.findIndex((rule) => rule.id === ruleId);
 
       if (index === -1) {
-        return res.status(404).json({
-          error: 'Rule not found',
-          message: `Rule with ID '${ruleId}' does not exist`,
-        });
+        return sendError(res, req, 404, 'Rule not found', `Rule with ID '${ruleId}' does not exist`);
       }
 
       appConfig.rules.splice(index, 1);
@@ -199,10 +194,7 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
         rule: undefined,
       });
     } catch (error) {
-      return res.status(500).json({
-        error: 'Failed to delete rule',
-        message: error instanceof Error ? error.message : 'Unknown error',
-      });
+      return sendError(res, req, 500, 'Failed to delete rule', getErrorMessage(error));
     }
   });
 
@@ -210,11 +202,15 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
     try {
       const paramsData = (req as Request & { validatedParams?: { key: string } }).validatedParams || req.params;
       const { key } = paramsData;
+      const currentWindowStart = Math.floor(Date.now() / 60000) * 60000;
 
       await Promise.all([
+        redis.del(key),
         redis.del(`tb:${key}`),
         redis.del(`sw:${key}`),
         redis.del(`fw:${key}`),
+        redis.del(`${key}:${currentWindowStart}`),
+        redis.del(`fw:${key}:${currentWindowStart}`),
       ]);
 
       res.json({
@@ -224,17 +220,11 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
       });
     } catch (error) {
       log.system('Rate limit reset error', {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
         endpoint: req.path,
         method: req.method,
       });
-      res.status(500).json({
-        error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date().toISOString(),
-        path: req.path,
-        statusCode: 500,
-      });
+      sendError(res, req, 500, 'Internal Server Error', getErrorMessage(error));
     }
   });
 
@@ -243,13 +233,7 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
       const { email, password } = req.body;
 
       if (!appConfig.security.demoUsersEnabled) {
-        res.status(503).json({
-          error: 'Demo authentication disabled',
-          message: 'Demo users are disabled. Please configure your own authentication system.',
-          timestamp: new Date().toISOString(),
-          path: req.path,
-          statusCode: 503,
-        });
+        sendError(res, req, 503, 'Demo authentication disabled', 'Demo users are disabled. Please configure your own authentication system.');
         return;
       }
 
@@ -262,13 +246,7 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
 
       const user = demoUsers[email as keyof typeof demoUsers];
       if (!user || password !== 'demo123') {
-        res.status(401).json({
-          error: 'Invalid credentials',
-          message: 'Use one of the demo accounts: admin@example.com, premium@example.com, user@example.com, guest@example.com with password: demo123',
-          timestamp: new Date().toISOString(),
-          path: req.path,
-          statusCode: 401,
-        });
+        sendError(res, req, 401, 'Invalid credentials', 'Use one of the demo accounts: admin@example.com, premium@example.com, user@example.com, guest@example.com with password: demo123');
         return;
       }
 
@@ -299,13 +277,7 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
         expiresIn: '24h',
       });
     } catch (error) {
-      res.status(500).json({
-        error: 'Authentication failed',
-        message: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date().toISOString(),
-        path: req.path,
-        statusCode: 500,
-      });
+      sendError(res, req, 500, 'Authentication failed', getErrorMessage(error));
     }
   });
 
@@ -324,7 +296,7 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
 
   app.get('/metrics', async (req: Request, res: Response): Promise<void> => {
     if (process.env.METRICS_ENABLED === 'false') {
-      res.status(404).json({ error: 'Metrics disabled' });
+      sendError(res, req, 404, 'Metrics disabled', 'Metrics are disabled');
       return;
     }
 
@@ -339,11 +311,11 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
       });
     } catch (error) {
       log.system('Metrics endpoint error', {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
         severity: 'medium',
         endpoint: '/metrics',
       });
-      res.status(500).json({ error: 'Failed to render metrics' });
+      sendError(res, req, 500, 'Metrics Error', 'Failed to render metrics');
     }
   });
 
@@ -423,13 +395,7 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
         },
       });
     } catch (error) {
-      res.status(500).json({
-        error: 'Failed to get stats',
-        message: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date().toISOString(),
-        path: req.path,
-        statusCode: 500,
-      });
+      sendError(res, req, 500, 'Stats Error', getErrorMessage(error));
     }
   });
 
@@ -461,13 +427,7 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
         },
       });
     } catch (error) {
-      res.status(500).json({
-        error: 'Failed to get performance stats',
-        message: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date().toISOString(),
-        path: req.path,
-        statusCode: 500,
-      });
+      sendError(res, req, 500, 'Performance Error', getErrorMessage(error));
     }
   });
 
@@ -475,22 +435,13 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
     try {
       const endpoint = decodeURIComponent(req.params[0] || '');
       if (!endpoint) {
-        return res.status(400).json({
-          error: 'Endpoint path is required',
-          timestamp: new Date().toISOString(),
-          path: req.path,
-          statusCode: 400,
-        });
+        return sendError(res, req, 400, 'Missing endpoint', 'Endpoint path is required');
       }
 
       const endpointStats = performanceMonitor.getEndpointStats(endpoint);
       if (!endpointStats) {
-        return res.status(404).json({
-          error: 'No performance data found for this endpoint',
-          endpoint,
-          timestamp: new Date().toISOString(),
-          path: req.path,
-          statusCode: 404,
+        return sendError(res, req, 404, 'Performance data not found', 'No performance data found for this endpoint', {
+          extra: { endpoint },
         });
       }
 
@@ -501,13 +452,7 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
         stats: endpointStats,
       });
     } catch (error) {
-      return res.status(500).json({
-        error: 'Failed to get endpoint performance stats',
-        message: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date().toISOString(),
-        path: req.path,
-        statusCode: 500,
-      });
+      return sendError(res, req, 500, 'Performance Error', getErrorMessage(error));
     }
   });
 
@@ -519,7 +464,7 @@ export function registerCoreRoutes(app: Express, options: RegisterCoreRoutesOpti
         data: exportData,
       });
     } catch (error) {
-      res.status(500).json({ error: 'Failed to export metrics' });
+      sendError(res, req, 500, 'Metrics Export Error', 'Failed to export metrics');
     }
   });
 
