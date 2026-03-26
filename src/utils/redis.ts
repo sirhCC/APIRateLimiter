@@ -380,18 +380,30 @@ export class RedisClient {
   }
 
   async disconnect(): Promise<void> {
-    if (this.client && this.isConnected) {
-      try {
-        await this.client.quit();
-      } catch (error) {
-        // Ignore disconnect errors in test environment
-        if (process.env.NODE_ENV !== 'test') {
-          log.system('Redis disconnect error', {
-            error: error instanceof Error ? error.message : String(error),
-            severity: 'low' as const
-          });
-        }
+    if (!this.client) {
+      return;
+    }
+
+    const client = this.client;
+    this.client = null;
+    this.isConnected = false;
+
+    try {
+      if (client.status === 'ready') {
+        await client.quit();
+      } else {
+        client.disconnect();
       }
+    } catch (error) {
+      // Ignore disconnect errors in test environment
+      if (process.env.NODE_ENV !== 'test') {
+        log.system('Redis disconnect error', {
+          error: error instanceof Error ? error.message : String(error),
+          severity: 'low' as const
+        });
+      }
+    } finally {
+      client.removeAllListeners();
     }
   }
 }

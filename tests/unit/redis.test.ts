@@ -27,7 +27,10 @@ describe('Redis Utilities', () => {
       port: 6379,
       db: 15,
       lazyConnect: true,
-      maxRetriesPerRequest: 3
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false,
+      connectTimeout: 1000,
+      retryStrategy: () => null,
     });
 
     try {
@@ -36,6 +39,8 @@ describe('Redis Utilities', () => {
     } catch (error) {
       console.warn('Redis not available for testing, skipping Redis tests');
       redisAvailable = false;
+      directRedis.disconnect();
+      directRedis.removeAllListeners();
     }
   });
 
@@ -44,7 +49,15 @@ describe('Redis Utilities', () => {
       await testRedis.disconnect();
     }
     if (directRedis) {
-      await directRedis.disconnect();
+      try {
+        if (directRedis.status === 'ready') {
+          await directRedis.quit();
+        } else {
+          directRedis.disconnect();
+        }
+      } finally {
+        directRedis.removeAllListeners();
+      }
     }
   });
 

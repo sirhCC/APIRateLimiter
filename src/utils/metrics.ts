@@ -4,7 +4,7 @@ import client from 'prom-client';
 export const metricsRegistry = new client.Registry();
 
 // Default metrics (Node.js process metrics)
-if (process.env.METRICS_DEFAULTS !== 'false') {
+if (process.env.NODE_ENV !== 'test' && process.env.METRICS_DEFAULTS !== 'false') {
   client.collectDefaultMetrics({ register: metricsRegistry, prefix: 'api_rl_' });
 }
 

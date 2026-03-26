@@ -8,7 +8,7 @@
 import { config } from 'dotenv';
 
 // Load test environment variables
-config({ path: '.env.test' });
+config({ path: '.env.test', quiet: true });
 
 // Set default test environment variables if not provided
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
@@ -18,6 +18,7 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-do-not-use-i
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || 'test-api-key-secret-do-not-use-in-production';
 process.env.PORT = process.env.PORT || '3001'; // Use different port for tests
 process.env.CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:3000';
+process.env.LOG_SILENT = process.env.LOG_SILENT || 'true';
 
 // Global test utilities
 declare global {
