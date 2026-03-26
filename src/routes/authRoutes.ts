@@ -18,6 +18,7 @@ export interface RegisterAuthRoutesOptions {
 export function registerAuthRoutes(app: Express, options: RegisterAuthRoutesOptions): void {
   const jwt = require('jsonwebtoken');
   const { appConfig, authRateLimiter } = options;
+  const demoEndpointsEnabled = appConfig.security.demoEndpointsEnabled;
 
   app.post('/auth/login', authRateLimiter, validateJwtEndpoint(LoginRequestSchema, LoginResponseSchema), async (req: Request, res: Response): Promise<void> => {
     try {
@@ -91,39 +92,41 @@ export function registerAuthRoutes(app: Express, options: RegisterAuthRoutesOpti
     });
   });
 
-  app.get('/admin/users', requireJWT(appConfig.security.jwtSecret), requireRole(['admin']), (req, res) => {
-    res.json({
-      message: 'Admin endpoint accessed successfully',
-      user: req.user,
-      data: {
-        totalUsers: 1234,
-        activeUsers: 892,
-        premiumUsers: 156,
-      },
+  if (demoEndpointsEnabled) {
+    app.get('/admin/users', requireJWT(appConfig.security.jwtSecret), requireRole(['admin']), (req, res) => {
+      res.json({
+        message: 'Admin endpoint accessed successfully',
+        user: req.user,
+        data: {
+          totalUsers: 1234,
+          activeUsers: 892,
+          premiumUsers: 156,
+        },
+      });
     });
-  });
 
-  app.get('/premium/features', requireJWT(appConfig.security.jwtSecret), requireRole(['admin', 'premium']), (req, res) => {
-    res.json({
-      message: 'Premium features accessed',
-      user: req.user,
-      features: [
-        'Advanced Analytics',
-        'Priority Support',
-        'Custom Rate Limits',
-        'API Access',
-      ],
+    app.get('/premium/features', requireJWT(appConfig.security.jwtSecret), requireRole(['admin', 'premium']), (req, res) => {
+      res.json({
+        message: 'Premium features accessed',
+        user: req.user,
+        features: [
+          'Advanced Analytics',
+          'Priority Support',
+          'Custom Rate Limits',
+          'API Access',
+        ],
+      });
     });
-  });
 
-  app.get('/secure/data', requireJWT(appConfig.security.jwtSecret), requirePermission(['read', 'write']), (req, res) => {
-    res.json({
-      message: 'Secure data accessed',
-      user: req.user,
-      data: {
-        sensitive: 'This requires read and write permissions',
-        timestamp: new Date().toISOString(),
-      },
+    app.get('/secure/data', requireJWT(appConfig.security.jwtSecret), requirePermission(['read', 'write']), (req, res) => {
+      res.json({
+        message: 'Secure data accessed',
+        user: req.user,
+        data: {
+          sensitive: 'This requires read and write permissions',
+          timestamp: new Date().toISOString(),
+        },
+      });
     });
-  });
+  }
 }
