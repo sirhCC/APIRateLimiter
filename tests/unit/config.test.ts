@@ -36,6 +36,26 @@ describe('Configuration hash endpoint', () => {
 
     expect(cfg.security.demoUsersEnabled).toBe(false);
     expect(cfg.security.demoEndpointsEnabled).toBe(false);
+    expect(cfg.environment.isProduction).toBe(true);
+  });
+
+  it('builds centralized environment profile fields', () => {
+    process.env.NODE_ENV = 'test';
+    process.env.ENABLE_TRUST_PROXY = 'true';
+    process.env.IP_WHITELIST = '10.0.0.1, 10.0.0.2';
+    process.env.IP_BLACKLIST = '192.168.0.10';
+    process.env.METRICS_ENABLED = 'false';
+
+    const cfg = loadConfig();
+
+    expect(cfg.environment).toMatchObject({
+      name: 'test',
+      isTest: true,
+      trustProxy: true,
+      ipWhitelist: ['10.0.0.1', '10.0.0.2'],
+      ipBlacklist: ['192.168.0.10'],
+      metricsEndpointEnabled: false,
+    });
   });
 
   it('requires JWT_SECRET in production', () => {
