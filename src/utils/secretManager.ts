@@ -11,6 +11,8 @@ export class SecretManager {
   private static readonly MIN_SECRET_LENGTH = 32;
   private static readonly WEAK_SECRETS = [
     'your-super-secret-jwt-key-change-in-production',
+    'fallback-demo-secret-change-in-production',
+    'test-jwt-secret-do-not-use-in-production',
     'change-me',
     'secret',
     'password',
