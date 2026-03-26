@@ -48,7 +48,7 @@ export function registerSystemRoutes(app: Express, options: RegisterSystemRoutes
       },
       uptime: process.uptime(),
       version: process.env.npm_package_version,
-      environment: process.env.NODE_ENV || 'development',
+      environment: appConfig.environment.name,
     };
 
     res.status(status.healthy ? 200 : 503).json(health);
@@ -92,7 +92,7 @@ export function registerSystemRoutes(app: Express, options: RegisterSystemRoutes
         server: {
           port: appConfig.server.port,
           host: appConfig.server.host,
-          env: process.env.NODE_ENV || 'development',
+          env: appConfig.environment.name,
         },
         redis: {
           enabled: appConfig.redis.enabled,
@@ -120,7 +120,7 @@ export function registerSystemRoutes(app: Express, options: RegisterSystemRoutes
   });
 
   app.get('/metrics', async (req: Request, res: Response): Promise<void> => {
-    if (process.env.METRICS_ENABLED === 'false') {
+    if (!appConfig.environment.metricsEndpointEnabled) {
       sendError(res, req, 404, 'Metrics disabled', 'Metrics are disabled', {
         code: ERROR_CODES.METRICS.DISABLED,
       });
