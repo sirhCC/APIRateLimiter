@@ -11,6 +11,9 @@ const EnvSchema = z.object({
   NODE_ENV: z.string().optional().default('development'),
   PORT: z.string().regex(/^\d+$/).optional().default('3000'),
   HOST: z.string().optional().default('0.0.0.0'),
+  ENABLE_TRUST_PROXY: z.string().optional(),
+  IP_WHITELIST: z.string().optional(),
+  IP_BLACKLIST: z.string().optional(),
   REDIS_HOST: z.string().optional().default('localhost'),
   REDIS_PORT: z.string().regex(/^\d+$/).optional().default('6379'),
   REDIS_DB: z.string().regex(/^\d+$/).optional().default('0'),
@@ -19,6 +22,7 @@ const EnvSchema = z.object({
   DEFAULT_MAX_REQUESTS: z.string().regex(/^\d+$/).optional().default('100'),
   DEFAULT_ALGORITHM: z.enum(['token-bucket', 'sliding-window', 'fixed-window']).optional().default('sliding-window'),
   MONITORING_ENABLED: z.string().optional(),
+  METRICS_ENABLED: z.string().optional(),
   STATS_RETENTION_MS: z.string().regex(/^\d+$/).optional().default('3600000'),
   JWT_SECRET: z.string().optional(),
   JWT_EXPIRES_IN: z.string().optional().default('24h'),
@@ -32,6 +36,27 @@ const EnvSchema = z.object({
 });
 
 export type LoadedEnv = z.infer<typeof EnvSchema>;
+
+function parseCsvList(value?: string): string[] {
+  return value
+    ?.split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean) || [];
+}
+
+function buildEnvironmentProfile(parsed: LoadedEnv) {
+  const name = parsed.NODE_ENV;
+  return {
+    name,
+    isDevelopment: name === 'development',
+    isTest: name === 'test',
+    isProduction: name === 'production',
+    trustProxy: parsed.ENABLE_TRUST_PROXY === 'true',
+    ipWhitelist: parseCsvList(parsed.IP_WHITELIST),
+    ipBlacklist: parseCsvList(parsed.IP_BLACKLIST),
+    metricsEndpointEnabled: parsed.METRICS_ENABLED !== 'false',
+  };
+}
 
 function parseRules(json?: string): RateLimitRule[] {
   if (!json) return [];
@@ -82,7 +107,8 @@ function validateProductionSecurity(parsed: LoadedEnv): void {
 
 export function loadConfig(): ApiRateLimiterConfig {
   const parsed = EnvSchema.parse(process.env);
-  const demoFeaturesEnabledByDefault = parsed.NODE_ENV === 'development' || parsed.NODE_ENV === 'test';
+  const environment = buildEnvironmentProfile(parsed);
+  const demoFeaturesEnabledByDefault = environment.isDevelopment || environment.isTest;
   const jwtSecret = resolveJwtSecret(parsed);
 
   validateProductionSecurity(parsed);
@@ -101,6 +127,7 @@ export function loadConfig(): ApiRateLimiterConfig {
       port: parseInt(parsed.PORT, 10),
       host: parsed.HOST,
     },
+    environment,
     defaultRateLimit: {
       windowMs: parseInt(parsed.DEFAULT_WINDOW_MS, 10),
       max: parseInt(parsed.DEFAULT_MAX_REQUESTS, 10),
@@ -138,6 +165,13 @@ function stableStringify(obj: any): string {
 function configFingerprintSubset(cfg: ApiRateLimiterConfig) {
   return {
     server: { port: cfg.server.port, host: cfg.server.host },
+    environment: {
+      name: cfg.environment.name,
+      trustProxy: cfg.environment.trustProxy,
+      ipWhitelist: cfg.environment.ipWhitelist,
+      ipBlacklist: cfg.environment.ipBlacklist,
+      metricsEndpointEnabled: cfg.environment.metricsEndpointEnabled,
+    },
     redis: { host: cfg.redis.host, port: cfg.redis.port, enabled: cfg.redis.enabled, db: cfg.redis.db },
     defaultRateLimit: cfg.defaultRateLimit,
     monitoring: cfg.monitoring,
@@ -168,6 +202,7 @@ export function computeConfigHash(cfg: ApiRateLimiterConfig): { hash: string; in
     hash,
     includedFields: [
       'server.port','server.host',
+      'environment.name','environment.trustProxy','environment.ipWhitelist','environment.ipBlacklist','environment.metricsEndpointEnabled',
       'redis.host','redis.port','redis.enabled','redis.db',
       'defaultRateLimit.windowMs','defaultRateLimit.max','defaultRateLimit.algorithm',
       'monitoring.enabled','monitoring.statsRetentionMs',
