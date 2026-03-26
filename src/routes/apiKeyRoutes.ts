@@ -1,6 +1,7 @@
 import { Express, Request, Response, RequestHandler } from 'express';
 import { ApiKeyManager } from '../utils/apiKeys';
 import { validateApiKeyEndpoint, validateSystemEndpoint } from '../middleware/validation';
+import { getErrorMessage, sendError } from '../utils/httpErrors';
 import {
   ApiKeyParamsSchema,
   ApiKeyResponseSchema,
@@ -81,13 +82,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
         metadata: result.metadata,
       });
     } catch (error) {
-      res.status(500).json({
-        error: 'Failed to generate API key',
-        message: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date().toISOString(),
-        path: req.path,
-        statusCode: 500,
-      });
+      sendError(res, req, 500, 'API key generation failed', getErrorMessage(error));
     }
   });
 
@@ -97,13 +92,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
       const userId = typeof queryData.userId === 'string' ? queryData.userId : undefined;
 
       if (!userId) {
-        res.status(400).json({
-          error: 'Missing userId',
-          message: 'userId query parameter is required',
-          timestamp: new Date().toISOString(),
-          path: req.path,
-          statusCode: 400,
-        });
+        sendError(res, req, 400, 'Missing userId', 'userId query parameter is required');
         return;
       }
 
@@ -114,13 +103,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
         keys,
       });
     } catch (error) {
-      res.status(500).json({
-        error: 'Failed to retrieve API keys',
-        message: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date().toISOString(),
-        path: req.path,
-        statusCode: 500,
-      });
+      sendError(res, req, 500, 'API key retrieval failed', getErrorMessage(error));
     }
   });
 
@@ -131,12 +114,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
 
       const keyMetadata = await apiKeyManager.getKeyMetadata(keyId);
       if (!keyMetadata) {
-        res.status(404).json({
-          error: 'API key not found',
-          timestamp: new Date().toISOString(),
-          path: req.path,
-          statusCode: 404,
-        });
+        sendError(res, req, 404, 'API key not found', 'The requested API key does not exist');
         return;
       }
 
@@ -145,13 +123,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
         metadata: keyMetadata,
       });
     } catch (error) {
-      res.status(500).json({
-        error: 'Failed to retrieve API key details',
-        message: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date().toISOString(),
-        path: req.path,
-        statusCode: 500,
-      });
+      sendError(res, req, 500, 'API key lookup failed', getErrorMessage(error));
     }
   });
 
@@ -162,12 +134,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
 
       const success = await apiKeyManager.revokeApiKey(keyId);
       if (!success) {
-        res.status(404).json({
-          error: 'API key not found or already revoked',
-          timestamp: new Date().toISOString(),
-          path: req.path,
-          statusCode: 404,
-        });
+        sendError(res, req, 404, 'API key not found', 'API key not found or already revoked');
         return;
       }
 
@@ -176,13 +143,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
         keyId,
       });
     } catch (error) {
-      res.status(500).json({
-        error: 'Failed to revoke API key',
-        message: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date().toISOString(),
-        path: req.path,
-        statusCode: 500,
-      });
+      sendError(res, req, 500, 'API key revoke failed', getErrorMessage(error));
     }
   });
 
@@ -196,12 +157,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
 
       const rotation = await apiKeyManager.rotateApiKey(keyId, { gracePeriodMs });
       if (!rotation) {
-        res.status(404).json({
-          error: 'API key not found or inactive',
-          timestamp: new Date().toISOString(),
-          path: req.path,
-          statusCode: 404,
-        });
+        sendError(res, req, 404, 'API key not found', 'API key not found or inactive');
         return;
       }
 
@@ -219,13 +175,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
         },
       });
     } catch (error) {
-      res.status(500).json({
-        error: 'Failed to rotate API key',
-        message: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date().toISOString(),
-        path: req.path,
-        statusCode: 500,
-      });
+      sendError(res, req, 500, 'API key rotation failed', getErrorMessage(error));
     }
   });
 
@@ -237,12 +187,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
       const quotaCheck = await apiKeyManager.checkQuota(keyId);
       const keyMetadata = await apiKeyManager.getKeyMetadata(keyId);
       if (!keyMetadata) {
-        res.status(404).json({
-          error: 'API key not found',
-          timestamp: new Date().toISOString(),
-          path: req.path,
-          statusCode: 404,
-        });
+        sendError(res, req, 404, 'API key not found', 'The requested API key does not exist');
         return;
       }
 
@@ -264,13 +209,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
         },
       });
     } catch (error) {
-      res.status(500).json({
-        error: 'Failed to retrieve usage information',
-        message: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date().toISOString(),
-        path: req.path,
-        statusCode: 500,
-      });
+      sendError(res, req, 500, 'API key usage lookup failed', getErrorMessage(error));
     }
   });
 }
