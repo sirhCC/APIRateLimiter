@@ -18,6 +18,24 @@ export interface RegisterApiKeyRoutesOptions {
   criticalRateLimiter: RequestHandler;
 }
 
+function serializeApiKeyMetadata(metadata: Awaited<ReturnType<ApiKeyManager['getKeyMetadata']>> extends infer T ? T extends null ? never : T : never) {
+  return {
+    id: metadata.id,
+    name: metadata.name,
+    tier: metadata.tier,
+    userId: metadata.userId,
+    organizationId: metadata.organizationId,
+    createdAt: new Date(metadata.created).toISOString(),
+    expiresAt: metadata.expiresAt ? new Date(metadata.expiresAt).toISOString() : undefined,
+    isActive: metadata.isActive,
+    revokedAt: metadata.revokedAt ? new Date(metadata.revokedAt).toISOString() : undefined,
+    revokedBy: metadata.revokedBy,
+    revocationReason: metadata.revocationReason,
+    lastRotatedAt: metadata.lastRotatedAt ? new Date(metadata.lastRotatedAt).toISOString() : undefined,
+    metadata: metadata.metadata,
+  };
+}
+
 export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutesOptions): void {
   const { apiKeyManager, managementRateLimiter, criticalRateLimiter } = options;
 
@@ -63,13 +81,15 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
 
   app.post('/api-keys', managementRateLimiter, validateApiKeyEndpoint(CreateApiKeyRequestSchema, undefined, undefined, ApiKeyResponseSchema), async (req: Request, res: Response): Promise<void> => {
     try {
-      const { name, tier = 'free', userId, organizationId, metadata } = req.body;
+      const { name, tier = 'free', userId, organizationId, metadata, expiresAt } = req.body;
+      const expiresAtTimestamp = typeof expiresAt === 'string' ? Date.parse(expiresAt) : undefined;
 
       const result = await apiKeyManager.generateApiKey({
         name,
         tier,
         userId,
         organizationId,
+        expiresAt: Number.isFinite(expiresAtTimestamp) ? expiresAtTimestamp : undefined,
         metadata: {
           ...metadata,
           userAgent: req.get('User-Agent'),
@@ -80,7 +100,7 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
       res.status(201).json({
         message: 'API key generated successfully',
         apiKey: result.apiKey,
-        metadata: result.metadata,
+        metadata: serializeApiKeyMetadata(result.metadata),
       });
     } catch (error) {
       sendError(res, req, 500, 'API key generation failed', getErrorMessage(error), {
@@ -143,7 +163,12 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
       const paramsData = (req as Request & { validatedParams?: { keyId: string } }).validatedParams || req.params;
       const { keyId } = paramsData;
 
-      const success = await apiKeyManager.revokeApiKey(keyId);
+      const success = await apiKeyManager.revokeApiKey(keyId, {
+        revokedBy: req.user?.id || req.apiKey?.id || req.ip,
+        reason: typeof req.body?.reason === 'string' && req.body.reason.trim().length > 0
+          ? req.body.reason.trim()
+          : undefined,
+      });
       if (!success) {
         sendError(res, req, 404, 'API key not found', 'API key not found or already revoked', {
           code: ERROR_CODES.API_KEYS.NOT_FOUND,
