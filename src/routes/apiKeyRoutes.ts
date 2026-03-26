@@ -2,6 +2,7 @@ import { Express, Request, Response, RequestHandler } from 'express';
 import { ApiKeyManager } from '../utils/apiKeys';
 import { validateApiKeyEndpoint, validateSystemEndpoint } from '../middleware/validation';
 import { getErrorMessage, sendError } from '../utils/httpErrors';
+import { ERROR_CODES } from '../utils/errorCodes';
 import {
   ApiKeyParamsSchema,
   ApiKeyResponseSchema,
@@ -82,7 +83,9 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
         metadata: result.metadata,
       });
     } catch (error) {
-      sendError(res, req, 500, 'API key generation failed', getErrorMessage(error));
+      sendError(res, req, 500, 'API key generation failed', getErrorMessage(error), {
+        code: ERROR_CODES.API_KEYS.GENERATION_FAILED,
+      });
     }
   });
 
@@ -92,7 +95,9 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
       const userId = typeof queryData.userId === 'string' ? queryData.userId : undefined;
 
       if (!userId) {
-        sendError(res, req, 400, 'Missing userId', 'userId query parameter is required');
+        sendError(res, req, 400, 'Missing userId', 'userId query parameter is required', {
+          code: ERROR_CODES.API_KEYS.USER_ID_REQUIRED,
+        });
         return;
       }
 
@@ -103,7 +108,9 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
         keys,
       });
     } catch (error) {
-      sendError(res, req, 500, 'API key retrieval failed', getErrorMessage(error));
+      sendError(res, req, 500, 'API key retrieval failed', getErrorMessage(error), {
+        code: ERROR_CODES.API_KEYS.LIST_FAILED,
+      });
     }
   });
 
@@ -114,7 +121,9 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
 
       const keyMetadata = await apiKeyManager.getKeyMetadata(keyId);
       if (!keyMetadata) {
-        sendError(res, req, 404, 'API key not found', 'The requested API key does not exist');
+        sendError(res, req, 404, 'API key not found', 'The requested API key does not exist', {
+          code: ERROR_CODES.API_KEYS.NOT_FOUND,
+        });
         return;
       }
 
@@ -123,7 +132,9 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
         metadata: keyMetadata,
       });
     } catch (error) {
-      sendError(res, req, 500, 'API key lookup failed', getErrorMessage(error));
+      sendError(res, req, 500, 'API key lookup failed', getErrorMessage(error), {
+        code: ERROR_CODES.API_KEYS.LOOKUP_FAILED,
+      });
     }
   });
 
@@ -134,7 +145,9 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
 
       const success = await apiKeyManager.revokeApiKey(keyId);
       if (!success) {
-        sendError(res, req, 404, 'API key not found', 'API key not found or already revoked');
+        sendError(res, req, 404, 'API key not found', 'API key not found or already revoked', {
+          code: ERROR_CODES.API_KEYS.NOT_FOUND,
+        });
         return;
       }
 
@@ -143,7 +156,9 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
         keyId,
       });
     } catch (error) {
-      sendError(res, req, 500, 'API key revoke failed', getErrorMessage(error));
+      sendError(res, req, 500, 'API key revoke failed', getErrorMessage(error), {
+        code: ERROR_CODES.API_KEYS.REVOKE_FAILED,
+      });
     }
   });
 
@@ -157,7 +172,9 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
 
       const rotation = await apiKeyManager.rotateApiKey(keyId, { gracePeriodMs });
       if (!rotation) {
-        sendError(res, req, 404, 'API key not found', 'API key not found or inactive');
+        sendError(res, req, 404, 'API key not found', 'API key not found or inactive', {
+          code: ERROR_CODES.API_KEYS.NOT_FOUND,
+        });
         return;
       }
 
@@ -175,7 +192,9 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
         },
       });
     } catch (error) {
-      sendError(res, req, 500, 'API key rotation failed', getErrorMessage(error));
+      sendError(res, req, 500, 'API key rotation failed', getErrorMessage(error), {
+        code: ERROR_CODES.API_KEYS.ROTATION_FAILED,
+      });
     }
   });
 
@@ -187,7 +206,9 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
       const quotaCheck = await apiKeyManager.checkQuota(keyId);
       const keyMetadata = await apiKeyManager.getKeyMetadata(keyId);
       if (!keyMetadata) {
-        sendError(res, req, 404, 'API key not found', 'The requested API key does not exist');
+        sendError(res, req, 404, 'API key not found', 'The requested API key does not exist', {
+          code: ERROR_CODES.API_KEYS.NOT_FOUND,
+        });
         return;
       }
 
@@ -209,7 +230,9 @@ export function registerApiKeyRoutes(app: Express, options: RegisterApiKeyRoutes
         },
       });
     } catch (error) {
-      sendError(res, req, 500, 'API key usage lookup failed', getErrorMessage(error));
+      sendError(res, req, 500, 'API key usage lookup failed', getErrorMessage(error), {
+        code: ERROR_CODES.API_KEYS.USAGE_FAILED,
+      });
     }
   });
 }
