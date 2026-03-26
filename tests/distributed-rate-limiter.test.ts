@@ -78,10 +78,12 @@ describe('Distributed Rate Limiter', () => {
     if (redisAvailable && directRedis?.status === 'ready') {
       await directRedis.flushdb();
     }
+  });
 
-    // Clear test data
+  afterEach(async () => {
     if (rateLimiter) {
-      rateLimiter.resetStats();
+      await rateLimiter.shutdown();
+      rateLimiter = undefined;
     }
   });
   
@@ -96,6 +98,8 @@ describe('Distributed Rate Limiter', () => {
     });
     
     test('should handle Redis cluster configuration', async () => {
+      let clusterClient: DistributedRedisClient | undefined;
+
       const clusterConfig = {
         ...mockRedisConfig,
         cluster: {
@@ -109,11 +113,15 @@ describe('Distributed Rate Limiter', () => {
       
       // This will fail in test environment but should not throw
       try {
-        const clusterClient = createDistributedRedisClient(clusterConfig);
+        clusterClient = createDistributedRedisClient(clusterConfig);
         expect(clusterClient).toBeDefined();
       } catch (error) {
         // Expected in test environment without actual cluster
         expect(error).toBeDefined();
+      } finally {
+        if (clusterClient) {
+          await clusterClient.disconnect();
+        }
       }
     });
   });
