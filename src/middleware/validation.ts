@@ -107,8 +107,9 @@ export function validateResponse() {
     res.json = function(body: any) {
       try {
         const responseSchema = res.locals.responseSchema;
+        const isErrorResponse = res.statusCode >= 400 || Boolean(body?.error);
         
-        if (responseSchema) {
+        if (responseSchema && !isErrorResponse) {
           const result = responseSchema.safeParse(body);
           
           if (!result.success) {
