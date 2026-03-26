@@ -9,6 +9,7 @@ import {
 } from '../utils/schemas';
 import { getErrorMessage, sendError } from '../utils/httpErrors';
 import { ERROR_CODES } from '../utils/errorCodes';
+import { authenticateDemoUser, buildDemoLoginResponse, signDemoJwtToken } from '../services/demoAuthService';
 
 export interface RegisterAuthRoutesOptions {
   appConfig: ApiRateLimiterConfig;
@@ -16,7 +17,6 @@ export interface RegisterAuthRoutesOptions {
 }
 
 export function registerAuthRoutes(app: Express, options: RegisterAuthRoutesOptions): void {
-  const jwt = require('jsonwebtoken');
   const { appConfig, authRateLimiter } = options;
   const demoEndpointsEnabled = appConfig.security.demoEndpointsEnabled;
 
@@ -24,54 +24,16 @@ export function registerAuthRoutes(app: Express, options: RegisterAuthRoutesOpti
     try {
       const { email, password } = req.body;
 
-      if (!appConfig.security.demoUsersEnabled) {
-        sendError(res, req, 503, 'Demo authentication disabled', 'Demo users are disabled. Please configure your own authentication system.', {
-          code: ERROR_CODES.AUTH.DEMO_DISABLED,
+      const authResult = authenticateDemoUser(email, password, appConfig.security.demoUsersEnabled);
+      if (!authResult.ok) {
+        sendError(res, req, authResult.status, authResult.error, authResult.message, {
+          code: authResult.code,
         });
         return;
       }
 
-      const demoUsers = {
-        'admin@example.com': { id: 'admin-1', role: 'admin', tier: 'enterprise' },
-        'premium@example.com': { id: 'premium-1', role: 'premium', tier: 'premium' },
-        'user@example.com': { id: 'user-1', role: 'user', tier: 'free' },
-        'guest@example.com': { id: 'guest-1', role: 'guest', tier: 'free' },
-      } as const;
-
-      const user = demoUsers[email as keyof typeof demoUsers];
-      if (!user || password !== 'demo123') {
-        sendError(res, req, 401, 'Invalid credentials', 'Use one of the demo accounts: admin@example.com, premium@example.com, user@example.com, guest@example.com with password: demo123', {
-          code: ERROR_CODES.AUTH.INVALID_CREDENTIALS,
-        });
-        return;
-      }
-
-      const token = jwt.sign(
-        {
-          id: user.id,
-          email,
-          role: user.role,
-          tier: user.tier,
-          permissions: user.role === 'admin' ? ['read', 'write', 'admin'] : ['read'],
-        },
-        appConfig.security.jwtSecret,
-        {
-          expiresIn: '24h',
-          algorithm: 'HS256',
-        }
-      );
-
-      res.json({
-        message: 'Login successful',
-        token,
-        user: {
-          id: user.id,
-          email,
-          role: user.role,
-          tier: user.tier,
-        },
-        expiresIn: '24h',
-      });
+      const token = signDemoJwtToken(appConfig.security.jwtSecret, email, authResult.user);
+      res.json(buildDemoLoginResponse(email, authResult.user, token));
     } catch (error) {
       sendError(res, req, 500, 'Authentication failed', getErrorMessage(error), {
         code: ERROR_CODES.AUTH.LOGIN_FAILED,
