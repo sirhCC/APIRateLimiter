@@ -46,17 +46,8 @@ module.exports = {
   // Clear mocks between tests
   clearMocks: true,
   
-  // Reset modules between tests
-  resetModules: true,
-  
   // Restore mocks after each test
   restoreMocks: true,
-  
-  // Force exit to prevent hanging
-  forceExit: true,
-  
-  // Detect open handles
-  detectOpenHandles: true,
   
   // Max workers for parallel execution
   maxWorkers: 1, // Use single worker to avoid Redis connection conflicts
