@@ -338,6 +338,7 @@ app.use((req, res, next) => {
 
 
 registerApiKeyRoutes(app, {
+  jwtSecret: appConfig.security.jwtSecret,
   apiKeyManager,
   managementRateLimiter,
   criticalRateLimiter,
