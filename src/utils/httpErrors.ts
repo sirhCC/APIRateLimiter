@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { ErrorResponse } from './schemas';
 
 interface ErrorResponseOptions {
+  code?: string;
   details?: ErrorResponse['details'];
   path?: string;
   statusCode?: number;
@@ -15,6 +16,7 @@ export function buildErrorResponse(
   options: ErrorResponseOptions = {}
 ): ErrorResponse & Record<string, unknown> {
   const response: ErrorResponse & Record<string, unknown> = {
+    code: options.code,
     error,
     message,
     timestamp: new Date().toISOString(),
