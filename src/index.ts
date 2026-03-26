@@ -15,6 +15,7 @@ import { createApiKeyMiddleware } from './middleware/apiKeyAuth';
 import { createJWTAuthMiddleware } from './middleware/jwtAuth';
 import { createRateLimitMiddleware, createAutoSensitiveRateLimiter, createSensitiveEndpointLogger } from './middleware';
 import { createSensitiveEndpointLimiter } from './middleware/sensitiveEndpointLimiter';
+import { createOptimizedRateLimiter } from './middleware/optimizedRateLimiter';
 import { createIPFilterMiddleware } from './middleware/ipFilter';
 import { createRateLimitLogger } from './middleware/logger';
 import { ApiRateLimiterConfig } from './types';
@@ -22,6 +23,7 @@ import { log, loggerMiddleware } from './utils/logger';
 import { loadConfig } from './utils/config';
 import { registerCoreRoutes } from './routes/coreRoutes';
 import { registerApiKeyRoutes } from './routes/apiKeyRoutes';
+import { getErrorMessage, sendError } from './utils/httpErrors';
 
 // Load environment variables
 config();
@@ -237,7 +239,7 @@ const createApiKeyAwareRateLimiter = () => {
         log.security('API key rate limiting error', {
           eventType: 'rate_limit_exceeded',
           severity: 'high',
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
           apiKey: req.headers['x-api-key'] as string,
           endpoint: req.originalUrl
         });
@@ -268,7 +270,7 @@ const createApiKeyAwareRateLimiter = () => {
         log.security('JWT rate limiting error', {
           eventType: 'rate_limit_exceeded',
           severity: 'high',
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
           userId: req.user?.id,
           endpoint: req.originalUrl
         });
@@ -320,7 +322,7 @@ app.use((req, res, next) => {
   finalRateLimitMiddleware(req, res, (err) => {
     if (err) {
       log.system('Rate limiting error', {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
         endpoint: req.originalUrl,
         method: req.method
       });
@@ -354,15 +356,18 @@ if (appConfig.proxy) {
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   log.system('Unhandled error', {
-    error: err instanceof Error ? err.message : String(err),
+    error: getErrorMessage(err),
     endpoint: req.originalUrl,
     method: req.method,
     severity: 'critical'
   });
-  res.status(500).json({
-    error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? err.message : undefined,
-  });
+  sendError(
+    res,
+    req,
+    500,
+    'Internal Server Error',
+    process.env.NODE_ENV === 'development' ? getErrorMessage(err) : 'An unexpected error occurred'
+  );
 });
 
 let server: any = null;
