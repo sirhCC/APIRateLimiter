@@ -20,6 +20,7 @@ export interface SecurityConfigSummary {
   corsOrigin: string;
   corsInfo: unknown;
   demoUsersEnabled: boolean;
+  demoEndpointsEnabled: boolean;
 }
 
 export interface RegisterSystemRoutesOptions {
